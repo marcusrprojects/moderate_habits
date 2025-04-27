@@ -1,5 +1,15 @@
 /**
- * @type {Object} PropertyKeys - Keys used for accessing various properties in the app.
+ * @fileoverview Defines various enumerations (enums) used throughout the application.
+ * These provide consistent keys and values for application modes, property keys,
+ * message types, UI actions, etc., improving code readability and maintainability.
+ */
+
+/** OnlyCurrentDoc */
+
+/**
+ * Keys used for accessing script and document properties via PropertiesService.
+ * @enum {string}
+ * @readonly
  */
 const PropertyKeys = {
   MODE: "mode",
@@ -15,7 +25,9 @@ const PropertyKeys = {
 };
 
 /**
- * @type {Object} BooleanTypes - Constants for true and false values.
+ * Standard boolean values represented as strings, primarily for storage in PropertiesService.
+ * @enum {string}
+ * @readonly
  */
 const BooleanTypes = {
   TRUE: "true",
@@ -23,16 +35,21 @@ const BooleanTypes = {
 };
 
 /**
- * @type {Object} ModeTypes - Various operational modes of the app.
+ * Various operational modes of the application, dictating UI and behavior.
+ * @enum {string}
+ * @readonly
  */
 const ModeTypes = {
-  CHALLENGE: "challenge", // Normal habit tracking mode
-  HABIT_IDEATION: "habitIdeation", // When you're setting up habits
-  TERMINATED: "terminated", // When habits have been stopped
+  CHALLENGE: "challenge", // Normal habit tracking mode.
+  HABIT_IDEATION: "habitIdeation", // Mode for setting up habits initially or resetting.
+  TERMINATED: "terminated", // Mode when habit tracking is intentionally stopped.
 };
 
 /**
- * @type {Object} LastUpdateTypes - Types of updates to track in the app.
+ * Types used to track the most recent significant update action (either completion or date change).
+ * This helps determine whether to save data before loading a new date.
+ * @enum {string}
+ * @readonly
  */
 const LastUpdateTypes = {
   COMPLETION: "completion",
@@ -40,7 +57,10 @@ const LastUpdateTypes = {
 };
 
 /**
- * @type {Object} MessageTypes - Constants for different types of messages displayed in the app.
+ * Keys identifying different types of standard messages or alerts shown to the user via the UI.
+ * Used by the Messages manager.
+ * @enum {string}
+ * @readonly
  */
 const MessageTypes = {
   TERMINATION_CONFIRMATION: "terminationConfirmation",
@@ -59,10 +79,13 @@ const MessageTypes = {
   NEW_VERSION_AVAILABLE: "newVersionAvailable",
   NO_NEW_UPDATES: "noNewUpdates",
   UNDEFINED_CELL_CHANGES: "undefinedCellChanges",
+  DATA_PARSE_ERROR: "dataParseError", // Added for JSON parsing errors in history
 };
 
 /**
- * @type {Object} ColumnAction - Constants for actions taken on columns.
+ * Constants defining actions for showing or hiding sheet columns.
+ * @enum {string}
+ * @readonly
  */
 const ColumnAction = {
   HIDE: "hide",
@@ -70,9 +93,20 @@ const ColumnAction = {
 };
 
 /**
- * @type {Object} CellAction - Constants for actions taken on cells.
+ * Constants defining actions for clearing or setting cell content, validation, or notes.
+ * @enum {string}
+ * @readonly
  */
 const CellAction = {
   CLEAR: "clear",
   SET: "set",
 };
+
+// Freeze enums to prevent modification at runtime.
+Object.freeze(PropertyKeys);
+Object.freeze(BooleanTypes);
+Object.freeze(ModeTypes);
+Object.freeze(LastUpdateTypes);
+Object.freeze(MessageTypes);
+Object.freeze(ColumnAction);
+Object.freeze(CellAction);
