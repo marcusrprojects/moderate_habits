@@ -42,7 +42,7 @@ It's designed for those who want a simple, customizable, and free way to monitor
 1. **Prerequisites:** You need a Google Account.
 2. **Request Access:**
     * Fill out the access request form:
-    * **➡️ [Link to your Google Form for Access Requests Here](https://tinyurl.com/moderate-habits-form) ⬅️**
+    * **➡️ [Google Form for Access Requests Here](https://tinyurl.com/moderate-habits-form) ⬅️**
     * This step is necessary to grant your Google Account permission to use the underlying script library.
 3. **Wait for Approval:**
     * Your request needs to be processed manually. Please allow some time for approval.
@@ -86,7 +86,7 @@ It's designed for those who want a simple, customizable, and free way to monitor
 * **Streaks & Buffers:** These are calculated automatically based on the `history` sheet. Missing a habit reduces its buffer the *next* day. If the buffer is 0 and you miss it, the current streak resets to 0 the next day. Buffers increase automatically based on your `boost interval` setting.
 * **Help:** Click **Moderate Habits Settings > Show Help (Current Page)** to open a sidebar with relevant information about the current sheet and mode.
 * **Detailed Guide:** For a more in-depth explanation and examples, refer to the guide (also linked in your approval email):
-  * **➡️ [Link to Guide Here](http://tinyurl.com/moderate-habits) ⬅️**
+  * **➡️ [Guide](http://tinyurl.com/moderate-habits) ⬅️**
 
 ## 🔧 Troubleshooting
 
