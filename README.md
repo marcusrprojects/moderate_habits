@@ -22,13 +22,6 @@ It's designed for those who want a simple, customizable, and free way to monitor
 * **Update Checker:** Option to check if a newer version of the script is available.
 * **Termination Mode:** Option to formally stop tracking while preserving history.
 
-## 📸 Screenshots
-
-* ![Screenshot of Main Tracking Interface - 'main' sheet](./assets/main-sheet-screenshot.png)
-* ![Screenshot of Habit Ideation Setup](./assets/new-challenge.png)
-* ![Screenshot of Help Sidebar](./assets/help-sidebar.png)
-* ![Screenshot of History Log - 'history' sheet](./assets/history-sheet-screenshot.png)
-
 ## ⚙️ How It Works
 
 * **`main` Sheet:** Your primary interface for daily tracking and viewing current status.
