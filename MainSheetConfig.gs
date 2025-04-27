@@ -101,7 +101,7 @@ const MainSheetConfig = {
    */
   setterNotes: {
     resetHour:
-      "Define the hour (0-23) at which the daily reset occurs. Default is 3 (3 A.M.). Whole numbers only.",
+      "Define the hour (0-23) for daily reset. Default is 3 (3 A.M.). **IMPORTANT: Use 'Setup Daily Reset Trigger' menu item after finalizing habits to apply changes to this setting.**",
     boostInterval:
       "Define the interval (in days) for earning buffer day boosts. Default is 7 (+1 buffer day per habit weekly). Must be 1 or greater.",
     setHabit:
