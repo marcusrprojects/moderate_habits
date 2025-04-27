@@ -66,6 +66,7 @@ It's designed for those who want a simple, customizable, and free way to monitor
     * Once ready, **check the `set habits` checkbox** (H3).
     * Confirm "Yes" when prompted.
 8. **Start Tracking!** The sheet will switch to Challenge Mode.
+9. **(Recommended) Set Daily Reset Time:** Go to **Moderate Habits Settings > Setup Daily Reset Trigger**. Click it. This ensures the daily reset happens at the time specified in your settings (or the default). You may need to grant permissions again if this is the first time running it. You should run this again *any time* you change the `resetHour` setting during a challenge reset.
 
 ## 💡 Usage Guide
 
@@ -80,6 +81,7 @@ It's designed for those who want a simple, customizable, and free way to monitor
 
 * **Menu Not Appearing:** Wait up to 30s on first open, or reload.
 * **Haven't Received Approval Email:** Please allow some time for manual processing of your access request. Remember to check your spam/junk folder for the email titled 'Access Granted to "moderate habits"'.
+* **Daily Reset Not Happening / Wrong Time:** Ensure you ran **Moderate Habits Settings > Setup Daily Reset Trigger** after the initial setup and after any time you changed the `resetHour` setting. Check Execution logs for errors during trigger setup.
 * **Authorization Errors/Loops:** Ensure you used the correct Google Account. Try removing permissions via Google Account settings (`Security > Third-party apps`) and re-authorizing using a menu item. Ensure `appsscript.json` scopes are correct if modifying the script.
 * **Script Errors ("An error occurred..."):** Check **Extensions > Apps Script > Executions** for detailed error messages.
 * **Performance:** Allow a few seconds for processing, especially with long history.

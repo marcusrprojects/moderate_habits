@@ -9,27 +9,24 @@
 /**
  * Runs when the spreadsheet is opened. Adds the custom menu.
  * Handles basic setup like property loading on subsequent opens.
- * Relies on user clicking 'Start New Challenge' for first-time setup and trigger creation.
+ * Relies on user clicking 'Start New Challenge' for first-time setup and initial trigger creation.
  * @param {object} e The event object (unused but standard for onOpen).
  */
 function onOpen(e) {
-  // Add custom menu
   SpreadsheetApp.getUi()
     .createMenu("Moderate Habits Settings")
     .addItem("Show Help (Current Page)", "showHelpSidebar")
     .addSeparator()
     .addItem("Start New Challenge", "startNewChallenge")
+    .addItem("Setup Daily Reset Trigger", "setupTriggerManually")
     .addItem("Terminate Challenge", "terminateChallenge")
     .addSeparator()
     .addItem("Check for Updates", "versionCheck")
     .addToUi();
 
-  // On subsequent opens (not first run), just load properties if needed.
-  // Trigger creation/check is handled by 'Start New Challenge' or manually.
   if (!isFirstRun()) {
     LoggerManager.logDebug("Not first run - loading properties.");
-    // Accessing a property ensures PropertyManager loads if not already loaded.
-    PropertyManager.getProperty(PropertyKeys.MODE); // Example access
+    PropertyManager.getProperty(PropertyKeys.MODE); // Load props lazily on access
   } else {
     LoggerManager.logDebug(
       "First run detected by onOpen. User should click 'Start New Challenge'."
@@ -56,7 +53,8 @@ function isFirstRun() {
 
 /**
  * Function mapped to the menu item "Start New Challenge".
- * Handles both the very first setup (if needed) and resetting for subsequent new challenges.
+ * Handles both the very first setup and resetting for subsequent new challenges.
+ * Attempts initial trigger creation during the first run.
  */
 function startNewChallenge() {
   if (isFirstRun()) {
@@ -65,36 +63,30 @@ function startNewChallenge() {
       "Executing first-time setup via Start New Challenge menu item..."
     );
     try {
-      // 1. Prompt for Initial Authorization (Spreadsheet, UI, etc.)
-      LoggerManager.logDebug(
-        "Accessing spreadsheet service to potentially trigger initial auth..."
-      );
-      SpreadsheetApp.getActiveSpreadsheet().getName(); // Simple access to trigger auth if needed
-
-      // 2. Show Welcome Message (Requires UI Auth)
+      // ... (Steps 1-3: Auth prompt simulation, Welcome msg, Init Props) ...
+      LoggerManager.logDebug("Accessing spreadsheet service...");
+      SpreadsheetApp.getActiveSpreadsheet().getName();
       Messages.showAlert(MessageTypes.WELCOME_MESSAGE);
-
-      // 3. Initialize Properties (getProperty calls _initializeDefaultProperty internally)
       LoggerManager.logDebug("Initializing default properties...");
       PropertyManager.getProperty(PropertyKeys.MODE);
-      PropertyManager.getProperty(PropertyKeys.FIRST_CHALLENGE_DATE); // Sets date/row
+      PropertyManager.getProperty(PropertyKeys.FIRST_CHALLENGE_DATE);
       PropertyManager.getProperty(PropertyKeys.RESET_HOUR);
       PropertyManager.getProperty(PropertyKeys.BOOST_INTERVAL);
       PropertyManager.getProperty(PropertyKeys.EMOJI_LIST);
       PropertyManager.getProperty(PropertyKeys.LAST_DATE_SELECTOR_UPDATE);
       PropertyManager.getProperty(PropertyKeys.LAST_COMPLETION_UPDATE);
       PropertyManager.getProperty(PropertyKeys.LAST_UPDATE);
-      PropertyManager.setDocumentProperties(); // Save initialized properties
+      PropertyManager.setDocumentProperties();
 
       // 4. Attempt to Create Trigger (Requires script.scriptapp Auth)
       LoggerManager.logDebug(
-        "Attempting to create trigger (may require re-authorization)..."
+        "Attempting initial trigger creation (may require re-authorization)..."
       );
       const triggerCreated = TriggerManager.createTrigger(); // Call it here!
       if (!triggerCreated) {
         // Alert the user that trigger setup failed and they might need to do it manually
         SpreadsheetApp.getUi().alert(
-          "Initial setup complete, but failed to create the daily reset trigger. Please ensure permissions were fully granted (you may need to run this setup again or use 'Setup Daily Reset Trigger' from the menu later)."
+          "Initial setup complete, but failed to create the daily reset trigger. Please ensure permissions were fully granted, and use 'Moderate Habits Settings > Setup Daily Reset Trigger' menu item to try again if needed."
         );
       } else {
         LoggerManager.logDebug("Initial trigger creation successful.");
@@ -102,12 +94,11 @@ function startNewChallenge() {
 
       // 5. Initialize UI for Habit Setup
       LoggerManager.logDebug("Initializing Habit Ideation UI...");
-      HabitManager.initializeSetHabitUI();
-      Messages.showAlert(MessageTypes.CHALLENGE_RESET); // Inform user to set habits
+      HabitManager.initializeSetHabitUI(); // Sets mode to Ideation
+      Messages.showAlert(MessageTypes.CHALLENGE_RESET); // Inform user
 
       LoggerManager.logDebug("First-time setup process finished.");
     } catch (error) {
-      // Use LoggerManager to handle the error display and potential throw
       LoggerManager.handleError(
         `Error during first-time setup (startNewChallenge): ${error.message}\n${error.stack}`,
         true
@@ -120,8 +111,8 @@ function startNewChallenge() {
     if (response === Messages.ButtonTypes.YES) {
       LoggerManager.logDebug("User confirmed starting new challenge (reset).");
       // Re-initialize UI for habit setup
-      HabitManager.initializeSetHabitUI(); // This resets UI, sets mode to Ideation
-      // Trigger is NOT automatically created/updated here. User uses manual option if needed.
+      HabitManager.initializeSetHabitUI(); // Resets UI, sets mode to Ideation
+      // Trigger is NOT automatically created/updated here. User uses manual option.
       Messages.showAlert(MessageTypes.CHALLENGE_RESET); // Inform user
       PropertyManager.setDocumentProperties(); // Save mode change etc.
     } else {
@@ -211,6 +202,31 @@ function versionCheck() {
     SpreadsheetApp.getUi().alert(
       `An error occurred while checking for updates: ${e.message}`
     );
+  }
+}
+
+/**
+ * Menu item function: Sets up or re-creates the daily reset trigger manually.
+ */
+function setupTriggerManually() {
+  try {
+    LoggerManager.logDebug("Manual trigger setup requested.");
+    // Attempt creation - this should force auth prompt if needed and not granted
+    const success = TriggerManager.createTrigger(); // Will throw error if permissions missing
+    if (success) {
+      SpreadsheetApp.getUi().alert("Daily reset trigger setup successful.");
+    }
+    // If createTrigger failed due to non-permission error handled internally,
+    // an alert might be needed here, but typically it throws on critical failure.
+    // else { SpreadsheetApp.getUi().alert("Failed to setup trigger. Check logs."); }
+  } catch (e) {
+    // Catch potential permission error re-thrown from createTrigger
+    LoggerManager.handleError(
+      `Manual trigger setup failed: ${e.message}`,
+      false
+    ); // Log error from menu
+    // Alert is handled by LoggerManager if throwError=true was used, otherwise:
+    // SpreadsheetApp.getUi().alert("Failed to setup trigger. Please ensure permissions are granted and check logs.");
   }
 }
 
