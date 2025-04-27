@@ -1,611 +1,313 @@
 /**
- * Adds a custom menu to the Google Sheets UI upon opening the spreadsheet.
- *
- * This function creates a new menu called "One Month Moderate Settings" with a single item
- * labeled "Show Help". Selecting this item will trigger the `showHelpSidebar` function,
- * which displays the help sidebar.
+ * @fileoverview Manages the custom menu and help sidebar functionality.
  */
-function onOpen() {
-  const ui = SpreadsheetApp.getUi();
-  ui.createMenu("Moderate Habits Settings")
-    .addItem("Show Help (Current Page)", "showHelpSidebar")
-    .addItem("Start New Challenge", "startNewChallenge")
-    .addItem("Terminate Challenge", "terminateChallenge")
-    .addToUi();
-}
+
+/** OnlyCurrentDoc */
 
 /**
- * Displays a help sidebar in the Google Sheets UI.
- *
- * This function retrieves the name of the active sheet and passes it to an HTML template
- * (`HelpContent`). The sidebar is then displayed with the relevant content for the
- * current sheet.
- *
- * The help content is dynamically populated based on the current sheet, making it context-sensitive.
+ * Manages UI elements like the help sidebar and message dialogs.
  */
-function showHelpSidebar() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  const sheetName = sheet.getName();
+const HelpManager = {
+  /**
+   * Displays the help sidebar, populating it with content relevant to the active sheet and mode.
+   */
+  showHelpSidebar: function () {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+    const sheetName = sheet.getName();
+    const mode = PropertyManager.getProperty(PropertyKeys.MODE); // Ensure properties are loaded
 
-  // Create the HTML template from the 'HelpContent' file
-  const template = HtmlService.createTemplateFromFile("HelpContent");
-  template.sheetName = sheetName;
-
-  // Get the mode property
-  const mode = PropertyManager.getProperty(PropertyKeys.MODE);
-  template.mode = mode;
-
-  // Evaluate and display the sidebar
-  const htmlOutput = template.evaluate().setTitle("Help");
-  SpreadsheetApp.getUi().showSidebar(htmlOutput);
-}
-
-/**
- * Handles the logic for starting a new challenge.
- *
- * This function presents a confirmation dialog to the user before resetting the entire challenge.
- * If the user confirms, it initializes the UI for setting new habits and alerts the user to define
- * their habit spread.
- */
-function startNewChallenge() {
-  const response = Messages.showAlert(MessageTypes.START_NEW_CHALLENGE);
-
-  if (response == Messages.ButtonTypes.YES) {
-    HabitManager.initializeSetHabitUI(); // Initialize the habit setting UI
-    Messages.showAlert(MessageTypes.CHALLENGE_RESET);
-    PropertyManager.setDocumentProperties();
-  } else {
-    Messages.showAlert(MessageTypes.CHALLENGE_CANCELLED);
-  }
-}
-
-/**
- * Terminates the current challenge and updates the app state.
- *
- * This function handles the termination process of an ongoing challenge.
- * It asks the user for confirmation and, if confirmed, hides the tracking data,
- * resets the necessary sheet data, and changes the app mode to "terminated."
- * If the termination is canceled, a corresponding message is displayed.
- *
- * @function terminateChallenge
- */
-function terminateChallenge() {
-  const response = Messages.showAlert(MessageTypes.TERMINATION_CONFIRMATION);
-  if (response === Messages.ButtonTypes.YES) {
-    // Hide and reset tracking data
-    MainSheetConfig.toggleColumns(ColumnAction.HIDE);
-    MainSheetConfig.resetData();
-
-    // Set the property to indicate we are in the terminated mode
-    PropertyManager.setProperty(
-      PropertyKeys.MODE,
-      ModeTypes.TERMINATED,
-      (forceSet = true)
+    LoggerManager.logDebug(
+      `Showing help sidebar for sheet: ${sheetName}, mode: ${mode}`
     );
-    Messages.showAlert(MessageTypes.TERMINATED);
-  } else {
-    Messages.showAlert(MessageTypes.TERMINATION_CANCELLED);
-  }
-}
+
+    try {
+      // Create the HTML template from the 'HelpContent' file
+      const template = HtmlService.createTemplateFromFile("HelpContent");
+
+      // Pass data to the template
+      template.sheetName = sheetName;
+      template.mode = mode;
+      // Pass config objects directly to access their properties in HTML scriptlets
+      template.MainSheetConfig = MainSheetConfig;
+      template.HistorySheetConfig = HistorySheetConfig;
+      template.GlobalConfig = GlobalConfig; // Pass global config too
+
+      // Evaluate and display the sidebar
+      const htmlOutput = template
+        .evaluate()
+        .setTitle("Moderate Habits Help")
+        .setWidth(300); // Optional: Set a width
+      SpreadsheetApp.getUi().showSidebar(htmlOutput);
+    } catch (e) {
+      LoggerManager.handleError(
+        `Error creating or showing help sidebar: ${e.message}`,
+        true
+      );
+      SpreadsheetApp.getUi().alert(
+        "Could not display the help sidebar at this time."
+      );
+    }
+  },
+};
+Object.freeze(HelpManager);
 
 /**
- * Configuration for displaying messages and alerts in the app.
- *
- * The `Messages` object defines the types of buttons used in alerts,
- * handles displaying alerts to the user, and provides custom messages
- * for various actions within the app. It ensures consistent user
- * interaction for important notifications and confirmations.
- *
- * @type {Object}
+ * Manages displaying alerts and confirmation dialogs to the user.
  */
 const Messages = {
   /**
-   * Predefined button types used for displaying alert dialogs in the application.
-   *
-   * The `ButtonTypes` object defines various button sets that can be used in
-   * different types of alerts or prompts shown to the user. These types
-   * represent common UI buttons that a user can interact with in confirmation
-   * or information dialogs.
-   *
-   * @type {Object}
+   * Predefined button types used for mapping responses.
+   * @enum {string}
    */
   ButtonTypes: {
     OK: "OK",
-    YES_NO: "YES_NO",
     YES: "YES",
     NO: "NO",
-    CLOSE: "CLOSE",
+    CLOSE: "CLOSE", // Used for dialog close 'X' button
   },
 
   /**
-   * Displays an alert with a custom message based on the provided key.
-   *
-   * This method dynamically generates the alert's title, body, and buttons
-   * based on the message key passed. It validates if the message key exists
-   * and translates it to a UI alert for the user.
-   *
-   * @param {string} messageKey - The key that corresponds to a specific message.
-   * @returns {string} - The user's response to the alert, such as "OK" or "YES."
+   * Returns the appropriate Apps Script ButtonSet enum based on a string key.
+   * @private
+   * @param {string} buttonsKey - e.g., "YES_NO", "OK".
+   * @param {GoogleAppsScript.Base.Ui} ui - The UI instance.
+   * @returns {GoogleAppsScript.Base.ButtonSet} The corresponding ButtonSet.
+   */
+  _getButtonSet: function (buttonsKey, ui) {
+    switch (buttonsKey) {
+      case "YES_NO":
+        return ui.ButtonSet.YES_NO;
+      case "OK_CANCEL": // Add if needed
+        return ui.ButtonSet.OK_CANCEL;
+      case "YES_NO_CANCEL": // Add if needed
+        return ui.ButtonSet.YES_NO_CANCEL;
+      case "OK":
+      default:
+        return ui.ButtonSet.OK;
+    }
+  },
+
+  /**
+   * Validates if a dialog response string matches one of the expected ButtonTypes.
+   * @private
+   * @param {string} response - The response string from ui.alert().
+   * @returns {boolean} True if the response is valid.
+   */
+  _validateButtonResponse: function (response) {
+    // Check if the response string is one of the values in our ButtonTypes enum
+    return Object.values(this.ButtonTypes).includes(response);
+  },
+
+  /**
+   * Displays an alert or confirmation dialog based on a message type key.
+   * @param {MessageTypes} messageKey - The enum key for the message.
+   * @returns {Messages.ButtonTypes} The user's response (e.g., Messages.ButtonTypes.YES).
    */
   showAlert: function (messageKey) {
-    // Validate if the messageKey exists in MessageTypes
+    // Validate the key against the MessageTypes enum
     if (!Object.values(MessageTypes).includes(messageKey)) {
       LoggerManager.handleError(
-        `Invalid message key: ${messageKey}. It must be one of the following: ${Object.values(
-          MessageTypes
-        ).join(", ")}`
+        `Invalid message key passed to showAlert: ${messageKey}`,
+        true
       );
+      return this.ButtonTypes.CLOSE; // Return default on error
     }
 
-    const ui = SpreadsheetApp.getUi();
-    const { title, body, buttons } = Messages[messageKey]();
-    const buttonSet = Messages.getButtonSet(buttons, ui);
-
-    let response = String(ui.alert(title, body, buttonSet));
-
-    if (!this._validateButtonResponse(response, false)) {
-      response = this.ButtonTypes.CLOSE;
-      LoggerManager.logDebug(`Setting button ${response} to ButtonTypes.CLOSE`);
-    }
-    return response;
-  },
-
-  /**
-   * Returns the appropriate button set based on the buttons type.
-   *
-   * @param {string} buttons - The button type (OK, YES_NO, etc.).
-   * @param {Object} ui - The SpreadsheetApp UI instance.
-   * @returns {Object} - The corresponding button set from the UI.
-   */
-  getButtonSet: function (buttons, ui) {
-    if (buttons === this.ButtonTypes.YES_NO) {
-      return ui.ButtonSet.YES_NO;
-    } else {
-      return ui.ButtonSet.OK; // Default to OK if no match
-    }
-  },
-
-  /**
-   * Validates the button response against the known button types.
-   *
-   * @param {string} response - The user's response.
-   * @param {boolean} throwError - Whether to throw an error for invalid responses.
-   * @returns {boolean} - True if the response is valid, false otherwise.
-   */
-  _validateButtonResponse: function (response, throwError) {
-    // Check if the response is a recognized ButtonType
-    if (!this.ButtonTypes[response]) {
+    // Get the message configuration function associated with the key
+    const messageConfigFn = this[`_get_${messageKey}_Config`];
+    if (typeof messageConfigFn !== "function") {
       LoggerManager.handleError(
-        `No matching button type for response: ${response}.`,
-        throwError
+        `No config function found for message key: ${messageKey}`,
+        true
       );
-      return false;
+      return this.ButtonTypes.CLOSE;
     }
 
-    return true;
+    const { title, body, buttons } = messageConfigFn.call(this); // Get title, body, buttonsKey
+    const ui = SpreadsheetApp.getUi();
+    const buttonSet = this._getButtonSet(buttons, ui);
+
+    let response;
+    try {
+      response = ui.alert(title, body, buttonSet);
+      // Convert Apps Script response (e.g., ui.Button.YES) to our standard string enum
+      response = String(response).toUpperCase(); // Make it uppercase for consistency
+
+      // Validate the response
+      if (!this._validateButtonResponse(response)) {
+        LoggerManager.logDebug(
+          `Unrecognized dialog response: ${response}. Mapping to CLOSE.`
+        );
+        response = this.ButtonTypes.CLOSE;
+      }
+    } catch (e) {
+      LoggerManager.handleError(
+        `Error displaying alert for key ${messageKey}: ${e.message}`,
+        false
+      ); // Don't halt execution, return default
+      response = this.ButtonTypes.CLOSE;
+    }
+
+    LoggerManager.logDebug(
+      `Alert shown for ${messageKey}. User response: ${response}`
+    );
+    return response; // Return validated string from Messages.ButtonTypes
   },
 
-  [MessageTypes.NEW_VERSION_AVAILABLE]: function () {
+  // --- Message Configuration Functions ---
+  // Using a naming convention _get_KEY_Config
+
+  _get_newVersionAvailable_Config: function () {
     return {
       title: "New Version Available",
       body:
-        `There is now a new version of this library. Here are the steps for upgrading:\n\n` +
-        `1. In the menu, go to Extensions -> Apps Script.\n` +
-        `2. Click on the Editor on the lefthand side (symbol: < >).\n` +
-        `3. You should see "moderate habits" underneath "Libraries." Click that.\n` +
-        `4. Select the newest version (the largest number).\n`,
-      buttons: this.ButtonTypes.OK,
+        `There is now a new version of this library available.\n\n` +
+        `To upgrade:\n` +
+        `1. Go to Extensions > Apps Script.\n` +
+        `2. In the editor, click 'Libraries' on the left sidebar.\n` +
+        `3. Find 'ModerateHabits' (or similar name) in the list.\n` +
+        `4. Select the highest version number from the dropdown.\n` +
+        `5. Click 'Save'.`,
+      buttons: "OK", // Corresponds to ui.ButtonSet.OK
     };
   },
 
-  [MessageTypes.NO_NEW_UPDATES]: function () {
+  _get_noNewUpdates_Config: function () {
     return {
       title: "No New Updates",
-      body: `You're all caught up. \n\n` + `Thanks for checking!`,
-      buttons: this.ButtonTypes.OK,
+      body: `You are using the latest version.\n\nThanks for checking!`,
+      buttons: "OK",
     };
   },
 
-  [MessageTypes.TERMINATION_CONFIRMATION]: function () {
+  _get_terminationConfirmation_Config: function () {
     return {
-      title: "Stop Current Challenge",
-      body: `Are you sure you want to stop your current challenge? Your streaks and progress will be reset. Click "Yes" if you will no longer be using this spreadsheet for the forseeable future.`,
-      buttons: this.ButtonTypes.YES_NO,
+      title: "Terminate Challenge?",
+      body: `Are you sure you want to stop your current challenge?\n\nYour streaks and progress tracking will stop. Your history data will remain.\n\nClick "Yes" to confirm termination.`,
+      buttons: "YES_NO", // Corresponds to ui.ButtonSet.YES_NO
     };
   },
 
-  [MessageTypes.TERMINATED]: function () {
+  _get_terminated_Config: function () {
     return {
       title: "Challenge Terminated",
-      body: "Your challenge has been stopped. You can start a new challenge at any time.",
-      buttons: this.ButtonTypes.OK,
+      body: "Your challenge tracking has been stopped. You can start a new challenge from the 'Moderate Habits Settings' menu.",
+      buttons: "OK",
     };
   },
 
-  [MessageTypes.TERMINATION_CANCELLED]: function () {
+  _get_terminationCancelled_Config: function () {
     return {
-      title: "Challenge Termination Canceled",
-      body: "Challenge will not terminate. Keep going!",
-      buttons: this.ButtonTypes.OK,
+      title: "Termination Canceled",
+      body: "Challenge termination cancelled. Keep up the good work!",
+      buttons: "OK",
     };
   },
 
-  [MessageTypes.TERMINATION_REMINDER]: function () {
+  _get_terminationReminder_Config: function () {
     return {
-      title: "Challenge Termination Reminder",
-      body: "Your previous challenge has been terminated. You must start a new challenge, using the settings menu, to proceed.",
-      buttons: this.ButtonTypes.OK,
+      title: "Challenge Terminated",
+      body: "Tracking is currently stopped. To resume, please start a new challenge using the 'Moderate Habits Settings' menu.",
+      buttons: "OK",
     };
   },
 
-  [MessageTypes.INVALID_DATE]: function () {
+  _get_invalidDate_Config: function () {
     return {
-      title: "Invalid Date Selected",
-      body: `Must choose a valid date. Defaulting to today's date.`,
-      buttons: this.ButtonTypes.OK,
+      title: "Invalid Date",
+      body: `The selected date is invalid or outside the allowed range (between the challenge start date and today).\nPlease select a valid date. Defaulting to today's date.`,
+      buttons: "OK",
     };
   },
 
-  [MessageTypes.INVALID_SETTERS]: function () {
+  _get_invalidSetters_Config: function () {
     return {
-      title: "Invalid Setters",
-      body: `Must choose a valid reset hour (integers >= 0) and boost interval (integers >= 1). Defaulting to today's date.`,
-      buttons: this.ButtonTypes.OK,
+      title: "Invalid Settings",
+      body: `Please ensure the 'Reset Hour' (0-23) and 'Boost Interval' (1 or greater) have valid whole numbers before setting habits.`,
+      buttons: "OK",
     };
   },
 
-  [MessageTypes.CHALLENGE_RESET]: function () {
+  _get_challengeReset_Config: function () {
     return {
-      title: "Challenge Reset",
-      body: "The challenge has been reset. Please define your habit spread by selecting your daily emoji spread. This is the time to make any subheaders and format the activities column as you would like.",
-      buttons: this.ButtonTypes.OK,
+      title: "Set Up Your Habits",
+      body: "Challenge reset! Please define your habits by adding emojis in the 'activities' column.\n\nYou can also add non-emoji subheaders or notes.\n\nOnce ready, check the 'set habits' box on the right.",
+      buttons: "OK",
     };
   },
 
-  [MessageTypes.CHALLENGE_CANCELLED]: function () {
+  _get_challengeCancelled_Config: function () {
     return {
-      title: "Challenge Canceled",
-      body: "Challenge reset canceled.",
-      buttons: this.ButtonTypes.OK,
+      title: "Challenge Reset Cancelled",
+      body: "Starting a new challenge was cancelled.",
+      buttons: "OK",
     };
   },
 
-  [MessageTypes.HABIT_SPREAD_RESET]: function () {
+  _get_habitSpreadReset_Config: function () {
     return {
-      title: "Habit Spread Reset",
-      body: `The habit spread does not match the original setup. The emoji cells will be reset to their original state. To change your habit spread, please use the "Start New Challenge" option in the menu.`,
-      buttons: this.ButtonTypes.OK,
+      title: "Habit Structure Changed",
+      body: `It looks like the habits (emojis or their rows) in the 'activities' column were changed.\n\nChanges have been reverted to the original setup for consistency.\n\nTo change your habits, please use the "Start New Challenge" option in the menu.`,
+      buttons: "OK",
     };
   },
 
-  [MessageTypes.CONFIRM_HABIT_SPREAD]: function () {
+  _get_confirmHabitSpread_Config: function () {
     return {
-      title: "Confirm Habit Spread",
-      body: "Are you sure you want to proceed with this habit spread? This action is irreversible.",
-      buttons: this.ButtonTypes.YES_NO,
+      title: "Confirm Habits?",
+      body: "Finalize this habit setup and start the challenge?\n\nMake sure your emojis, reset hour, and boost interval are correct. This cannot be easily undone.",
+      buttons: "YES_NO",
     };
   },
 
-  [MessageTypes.START_NEW_CHALLENGE]: function () {
+  _get_startNewChallenge_Config: function () {
     return {
-      title: "Start New Challenge",
-      body: "Are you sure you want to reset everything and start a new challenge? This action is irreversible.",
-      buttons: this.ButtonTypes.YES_NO,
+      title: "Start New Challenge?",
+      body: "Are you sure you want to start a new challenge?\n\nThis will reset your current streaks and buffers and require you to set up your habits again. Your past history data will be preserved.",
+      buttons: "YES_NO",
     };
   },
 
-  [MessageTypes.WELCOME_MESSAGE]: function () {
+  _get_welcomeMessage_Config: function () {
     return {
       title: "Welcome to Moderate Habits!",
       body:
-        "Thanks for using this tool!\n\n" +
-        "It provides a simple way to structure your habits, with each habit represented by an emoji (repeated emojis are allowed!).\n" +
-        "You will be redirected to start your first habit challenge after this dialog. Enjoy!\n\n" +
-        'Tip: For guidance on how to get the most out of this tool, check out the help menu under the "Moderate Habits" dropdown for detailed instructions.',
-      buttons: this.ButtonTypes.OK,
+        "Get ready to build consistent habits!\n\n" +
+        "This tool helps you track daily activities using emojis, with integrated buffer days for flexibility.\n\n" +
+        "You'll now be guided to set up your first challenge.\n\n" +
+        "Tip: Use the help menu ('Moderate Habits Settings' > 'Show Help') for detailed instructions anytime.",
+      buttons: "OK",
     };
   },
 
-  [MessageTypes.NO_HABITS_SET]: function () {
+  _get_noHabitsSet_Config: function () {
     return {
-      title: "No Habits Set",
-      body: "Please set at least one habit (emoji) before proceeding.",
-      buttons: this.ButtonTypes.OK,
+      title: "No Habits Defined",
+      body: "Please define at least one habit (using an emoji) in the 'activities' column before confirming.",
+      buttons: "OK",
     };
   },
 
-  [MessageTypes.UNDEFINED_CELL_CHANGES]: function () {
+  _get_undefinedCellChanges_Config: function () {
     return {
-      title: "Undefined Changes to Cells",
+      title: "Protected Cell Edit",
       body:
-        "Woah there! Ensure that the change you just made to those cells was intentional. Otherwise, you may need to undo them via Control/Cmd + Z!\n" +
-        "Attempting to recover the data...",
-      buttons: this.ButtonTypes.OK,
+        "The cell(s) you tried to edit are protected or calculated automatically.\n\n" +
+        "Your change has been reverted. Use Control/Cmd+Z if you need to undo previous actions.",
+      buttons: "OK",
+    };
+  },
+
+  _get_dataParseError_Config: function () {
+    return {
+      title: "Data Reading Error",
+      body:
+        "There was an issue reading some stored data from the history sheet.\n\n" +
+        "Default values have been used instead. This might affect streak or buffer calculations temporarily.\n\n" +
+        "Check the execution logs for details if the problem persists.",
+      buttons: "OK",
     };
   },
 };
-
-/**
- * Manages the setup and configuration of habits within the application.
- *
- * The HabitManager handles various tasks related to habit ideation, validation, and finalization,
- * ensuring that the user experience is smooth and aligned with the overall application structure.
- * It provides methods to toggle UI elements, validate user inputs, and finalize habit configurations.
- */
-const HabitManager = {
-  /**
-   * Initializes the UI for habit ideation mode by hiding unnecessary columns and adding a checkbox for habit setup.
-   *
-   * Sets the property 'mode' to 'habitIdeation' to indicate ideation mode.
-   */
-  initializeSetHabitUI: function () {
-    // Hide the completion, buffer days, and streaks columns
-    MainSheetConfig.toggleColumns(ColumnAction.HIDE);
-    MainSheetConfig.resetData();
-    this.toggleHabitFields(CellAction.SET);
-    SpreadsheetApp.flush();
-
-    // Set the property to indicate we are in habit ideation mode
-    PropertyManager.setProperty(PropertyKeys.MODE, ModeTypes.HABIT_IDEATION);
-
-    const historySheet = HistorySheetConfig.getSheet();
-    const todayDateStr = DateManager.getTodayStr();
-    const lastDateStr = HistorySheetConfig.getLastDateStr();
-    LoggerManager.logDebug(
-      `comparing today's date ${todayDateStr} and last date ${lastDateStr}.`
-    );
-
-    if (lastDateStr && lastDateStr === todayDateStr) {
-      LoggerManager.logDebug(`Should be clearing last row...`);
-      historySheet
-        .getRange(historySheet.getLastRow(), 1, 1, historySheet.getLastColumn())
-        .clearContent(); // Clears the entire row's content
-    }
-  },
-
-  /**
-   * Validates the reset hour value from the main sheet.
-   *
-   * This function checks whether the reset hour is a non-negative integer.
-   * If the validation fails, it logs a debug message.
-   *
-   * @function __validateResetHour
-   * @returns {boolean} - True if the reset hour is valid, false otherwise.
-   */
-  __validateResetHour: function () {
-    const resetHourValue = MainSheetConfig.getSheet()
-      .getRange(MainSheetConfig.setterRanges.resetHour)
-      .getValue();
-
-    // Check if it's a non-negative number
-    if (UtilsManager.__validateNonNegativeInteger(resetHourValue)) {
-      return true;
-    } else {
-      LoggerManager.logDebug(`Invalid reset hour: ${resetHourValue}.`);
-      return false;
-    }
-  },
-
-  /**
-   * Validates the boost interval value from the main sheet.
-   *
-   * This function checks whether the boost interval is a non-negative integer
-   * and greater than 0. If the validation fails, it logs a debug message.
-   *
-   * @function __validateBoostInterval
-   * @returns {boolean} - True if the boost interval is valid, false otherwise.
-   */
-  __validateBoostInterval: function () {
-    const boostIntervalValue = MainSheetConfig.getSheet()
-      .getRange(MainSheetConfig.setterRanges.boostInterval)
-      .getValue();
-
-    // Check if it's a non-negative number
-    if (
-      UtilsManager.__validateNonNegativeInteger(boostIntervalValue) &&
-      boostIntervalValue > 0
-    ) {
-      return true;
-    } else {
-      LoggerManager.logDebug(`Invalid boost interval: ${boostIntervalValue}.`);
-      return false;
-    }
-  },
-
-  /**
-   * Validates both the reset hour and boost interval values.
-   *
-   * This method ensures that both the reset hour and boost interval are valid.
-   * If either validation fails, it logs an error message and returns false.
-   *
-   * @function _validatingSetters
-   * @param {boolean} throwError - Whether to throw an error if validation fails.
-   * @returns {boolean} - True if both values are valid, false otherwise.
-   */
-  _validatingSetters: function (throwError) {
-    if (!this.__validateResetHour() || !this.__validateBoostInterval()) {
-      LoggerManager.handleError(
-        "Invalid resetHour or boostInterval.",
-        throwError
-      );
-      return false;
-    }
-    return true;
-  },
-
-  /**
-   * Toggles and validates the display and value setting of the reset hour and boost interval fields.
-   *
-   * @param {string} action - Either 'CLEAR' to remove fields or 'SET' to set fields with validation.
-   * @returns {boolean|null} - Returns true if successful, false if validation fails, or null if action is unknown.
-   */
-  togglePropertySetters: function (action) {
-    if (action !== CellAction.CLEAR && action !== CellAction.SET) {
-      LoggerManager.handleError(
-        `togglePropertySetters called with unknown action: ${action}.`
-      );
-      return null;
-    }
-
-    const resetHourCell = MainSheetConfig.setterRanges.resetHour;
-    const boostIntervalCell = MainSheetConfig.setterRanges.boostInterval;
-
-    if (action === CellAction.CLEAR) {
-      PropertyManager.setProperty(
-        PropertyKeys.RESET_HOUR,
-        MainSheetConfig.getSheetValue(resetHourCell)
-      );
-      PropertyManager.setProperty(
-        PropertyKeys.BOOST_INTERVAL,
-        MainSheetConfig.getSheetValue(boostIntervalCell)
-      );
-    } else {
-      MainSheetConfig.setSheetValue(
-        resetHourCell,
-        PropertyManager.getProperty(PropertyKeys.RESET_HOUR)
-      );
-      MainSheetConfig.setSheetValue(
-        boostIntervalCell,
-        PropertyManager.getProperty(PropertyKeys.BOOST_INTERVAL)
-      );
-    }
-
-    return true; // Return true if all validations passed and action completed
-  },
-
-  /**
-   * Handles the logic when the habit spread checkbox is checked. It is called from the Handlers script.
-   *
-   * This function checks if the checkbox is checked, then confirms with the user if they want
-   * to proceed with the current habit spread. If confirmed, it finalizes the habit spread;
-   * otherwise, it alerts the user if no habits (emojis) have been set and resets the checkbox.
-   */
-  setHabitSpread: function () {
-    const sheet = MainSheetConfig.getSheet();
-    const checkboxCell = sheet.getRange(MainSheetConfig.setterRanges.setHabit);
-
-    // Check if the checkbox was checked
-    if (checkboxCell.getValue() === true) {
-      const response = Messages.showAlert(MessageTypes.CONFIRM_HABIT_SPREAD);
-      const setterValidation = this._validatingSetters(false);
-
-      // Get the current emoji spread
-      const currentEmojiSpread = MainSheetConfig.getCurrentEmojiSpread();
-      if (
-        response == Messages.ButtonTypes.YES &&
-        currentEmojiSpread.length > 0 &&
-        setterValidation
-      ) {
-        this.finalizeHabitSpread(); // Finalize the habit spread
-        return;
-      }
-
-      if (currentEmojiSpread.length === 0) {
-        Messages.showAlert(MessageTypes.NO_HABITS_SET);
-      }
-
-      if (!setterValidation) {
-        Messages.showAlert(MessageTypes.INVALID_SETTERS);
-      }
-
-      checkboxCell.setValue(false); // Reset the checkbox to unchecked
-      SpreadsheetApp.flush();
-    }
-  },
-
-  /**
-   * Toggles the display of the habit label and checkbox cells based on the provided action.
-   *
-   * @param {string} action - remove the habit label and checkbox, or add them.
-   */
-  toggleHabitFields: function (action) {
-    if (action !== CellAction.CLEAR && action !== CellAction.SET) {
-      LoggerManager.handleError(
-        `toggleHabitFields called with unknown action: ${action}.`
-      );
-      return;
-    }
-
-    this.togglePropertySetters(action);
-
-    // Define the ranges and labels for batch processing
-    const setterFields = {
-      labels: MainSheetConfig.setterLabelRanges,
-      cells: MainSheetConfig.setterRanges,
-      labelsText: MainSheetConfig.setterLabels,
-      notes: MainSheetConfig.setterNotes,
-    };
-
-    const sheet = MainSheetConfig.getSheet();
-
-    // Special case for 'setHabit' checkbox
-    const setHabitCellRange = sheet.getRange(setterFields.cells.setHabit);
-    action === CellAction.CLEAR
-      ? setHabitCellRange.clearDataValidations()
-      : setHabitCellRange.insertCheckboxes();
-
-    // Loop over all fields and perform the appropriate action
-    for (const key in setterFields.labels) {
-      const labelRange = sheet.getRange(setterFields.labels[key]);
-      const cellRange = sheet.getRange(setterFields.cells[key]);
-
-      if (action === CellAction.CLEAR) {
-        // Clear the label and cell
-        labelRange.clearContent();
-        labelRange.setBackground(SheetConfig.mainColor);
-        cellRange.clearNote();
-        cellRange.clearContent();
-      } else if (action === CellAction.SET) {
-        const labelText = setterFields.labelsText[key];
-        const noteText = setterFields.notes[key];
-
-        // Set the label, insert the checkbox for habits, and set the note
-        labelRange.setBackground(SheetConfig.secondaryColor);
-        labelRange.setFontWeight("bold");
-        LoggerManager.logDebug(`setting font weight of ${labelRange} to bold`);
-        labelRange.setValue(labelText);
-        cellRange.setNote(noteText);
-      }
-    }
-  },
-
-  /**
-   * Finalizes the habit spread after the user confirms their selection.
-   *
-   * Clears the habit label and checkbox, shows the hidden columns, and starts the challenge.
-   */
-  finalizeHabitSpread: function () {
-    const sheet = MainSheetConfig.getSheet();
-
-    // Remove habit ideation mode
-    PropertyManager.setProperty(PropertyKeys.MODE, ModeTypes.CHALLENGE);
-
-    PropertyManager.updateEmojiSpread();
-    PropertyManager.updateFirstChallengeDateAndRow();
-
-    this.toggleHabitFields(CellAction.CLEAR);
-    MainSheetConfig.toggleColumns(ColumnAction.SHOW);
-    SpreadsheetApp.flush();
-
-    const startRow = MainSheetConfig.firstDataInputRow;
-    const lastRow = sheet.getLastRow(); // Get the last row of data
-    const activitiesRange = sheet.getRange(
-      startRow,
-      MainSheetConfig.activityDataColumn,
-      lastRow - startRow + 1,
-      1
-    );
-    activitiesRange.setBackground(SheetConfig.mainColor);
-
-    // Re-add checkboxes in the completion column for relevant rows
-    MainSheetConfig.insertCompletionCheckboxes();
-
-    PropertyManager.setProperty(
-      PropertyKeys.LAST_UPDATE,
-      LastUpdateTypes.COMPLETION
-    );
-    MainSheetConfig.displayDate(DateManager.getTodayStr());
-
-    LoggerManager.logDebug(`Habit spread finalized and challenge started.`);
-  },
-};
+Object.freeze(Messages); // Freeze the main object
+// Individual config functions are properties and thus frozen.
