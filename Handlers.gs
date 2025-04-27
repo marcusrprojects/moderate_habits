@@ -48,40 +48,47 @@ function onOpen(e) {
 }
 
 /**
- * Initial setup function called only on the very first run.
- * Sets up properties, triggers, shows welcome message, and initiates habit setup.
+ * Initial setup function called only on the very first run for a new sheet copy.
+ * Ensures essential properties are initialized, creates triggers, shows welcome message,
+ * and initiates the habit setup UI.
  */
 function beginFirstTime() {
   LoggerManager.logDebug("Executing beginFirstTime...");
   try {
-    // Initialize essential properties (mode, first date etc.)
-    PropertyManager.initializeDefaultProperty(PropertyKeys.MODE); // Sets to HABIT_IDEATION
-    PropertyManager.initializeDefaultProperty(
-      PropertyKeys.FIRST_CHALLENGE_DATE
-    ); // Sets first date/row
-    PropertyManager.initializeDefaultProperty(PropertyKeys.RESET_HOUR);
-    PropertyManager.initializeDefaultProperty(PropertyKeys.BOOST_INTERVAL);
-    // Ensure properties are saved immediately after first init
+    // Ensure essential properties are initialized by simply accessing them.
+    // If they don't exist, getProperty will call _initializeDefaultProperty internally.
+    LoggerManager.logDebug("Initializing properties by access...");
+    PropertyManager.getProperty(PropertyKeys.MODE); // Ensures MODE is set (defaults to HABIT_IDEATION)
+    PropertyManager.getProperty(PropertyKeys.FIRST_CHALLENGE_DATE); // Ensures date/row are set
+    PropertyManager.getProperty(PropertyKeys.RESET_HOUR); // Ensures reset hour is set
+    PropertyManager.getProperty(PropertyKeys.BOOST_INTERVAL); // Ensures boost interval is set
+    PropertyManager.getProperty(PropertyKeys.EMOJI_LIST); // Ensures emoji list is initialized (likely to '[]')
+    PropertyManager.getProperty(PropertyKeys.LAST_DATE_SELECTOR_UPDATE); // Initialize timestamps
+    PropertyManager.getProperty(PropertyKeys.LAST_COMPLETION_UPDATE);
+    PropertyManager.getProperty(PropertyKeys.LAST_UPDATE);
+
+    // Ensure properties are saved immediately after potential first initialization
+    LoggerManager.logDebug("Saving potentially initialized properties...");
     PropertyManager.setDocumentProperties();
 
     // Create the daily trigger
-    TriggerManager.createTrigger();
+    LoggerManager.logDebug("Creating trigger...");
+    TriggerManager.createTrigger(); // <<< This now requires script.scriptapp scope
 
     // Show welcome message
     Messages.showAlert(MessageTypes.WELCOME_MESSAGE);
 
-    // Initiate the habit setup UI (doesn't require confirmation here)
-    HabitManager.initializeSetHabitUI();
+    // Initiate the habit setup UI
+    LoggerManager.logDebug("Initializing Set Habit UI...");
+    HabitManager.initializeSetHabitUI(); // This sets mode to HABIT_IDEATION again, which is fine
     Messages.showAlert(MessageTypes.CHALLENGE_RESET); // Inform user to set habits
 
     LoggerManager.logDebug("beginFirstTime completed successfully.");
   } catch (error) {
+    // Use LoggerManager to handle the error display and potential throw
     LoggerManager.handleError(
       `Error during first-time initialization (beginFirstTime): ${error.message}\n${error.stack}`,
       true
-    );
-    SpreadsheetApp.getUi().alert(
-      "An error occurred during the initial setup. Please try reloading the sheet or contact support if the issue persists."
     );
   }
 }
