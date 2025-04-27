@@ -19,7 +19,7 @@ It's designed for those who want a simple, customizable, and free way to monitor
 * **History Log:** Automatically logs daily completion, buffer status, and streaks to a separate 'history' sheet.
 * **Date Navigation:** View and update data for past days within the current challenge using a date selector.
 * **Dynamic Help:** Context-aware help sidebar explaining features based on the current sheet and mode.
-* **First-Run Setup:** Guided setup process for new users.
+* **First-Run Setup:** Guided setup process for new users via the "Start New Challenge" menu.
 * **Update Checker:** Option to check if a newer version of the script is available.
 * **Termination Mode:** Option to formally stop tracking while preserving history.
 
@@ -27,12 +27,7 @@ It's designed for those who want a simple, customizable, and free way to monitor
 
 * **`main` Sheet:** Your primary interface for daily tracking and viewing current status.
 * **`history` Sheet:** A read-only log storing the data for each day. All calculations are based on this sheet.
-* **Google Apps Script:** The backend logic handling:
-  * Daily resets (via time-driven trigger).
-  * Calculations (streaks, buffers).
-  * Data saving and propagation between `main` and `history`.
-  * UI updates (help sidebar, dialogs).
-  * Event handling (`onOpen`, `onEdit`).
+* **Google Apps Script:** The backend logic handling calculations, data persistence, UI, and automation.
 * **Access Request:** The core script logic is contained in a private library. You need to request access so your copy of the sheet can utilize this library.
 
 ## 🚀 Setup Instructions
@@ -43,62 +38,55 @@ It's designed for those who want a simple, customizable, and free way to monitor
 2. **Request Access:**
     * Fill out the access request form:
     * **➡️ [Google Form for Access Requests Here](https://tinyurl.com/moderate-habits-form) ⬅️**
-    * This step is necessary to grant your Google Account permission to use the underlying script library.
-3. **Wait for Approval:**
-    * Your request needs to be processed manually. Please allow some time for approval.
-    * You will receive an email titled **'Access Granted to "moderate habits"'** once your request is approved.
-    * ***Check your spam folder*** if you don't see the email within a reasonable time.
-4. **Receive Links & Copy the Sheet:**
+    * Wait for the approval email titled **'Access Granted to "moderate habits"'** (check spam). This email contains links to the template and guide.
+3. **Receive Links & Copy the Sheet:**
     * The approval email contains important links:
         * A link to the **Google Sheet Template**.
-        * A link to the **User Guide (PDF)**.
+        * A link to the **User Guide**.
     * Click the **Google Sheet Template** link from the email to open it.
     * Go to **File > Make a copy**.
     * Save the copy to your own Google Drive. *(Rename your copied sheet if desired)*.
-5. **Open Your Copy:** Open the Google Sheet *you just copied* to your Drive.
-6. **Run Initial Setup:**
-    * Wait a few seconds for the custom menu "**Moderate Habits Settings**" to appear at the top. *(It might take up to 30 seconds on the very first open).*
-    * Click **Moderate Habits Settings > \*\*Begin\*\***.
-7. **Authorize the Script:**
-    * You will be asked for authorization for the script *within your copied sheet*. Click **Continue** / **OK**.
-    * Choose the **same Google Account** you used to request access.
-    * You'll likely see a "**Google hasn't verified this app**" screen. This is normal and expected for custom scripts you copy.
-    * Click "**Advanced**" (usually a small link).
-    * Click "**Go to [Your Sheet Name] (unsafe)**".
-    * Review the permissions. The script needs access *to this specific spreadsheet* to function.
+4. **Open Your Copy:** Open the Google Sheet *you just copied* to your Drive.
+5. **Run Initial Setup / Start Challenge:**
+    * Wait a few seconds for the custom menu "**Moderate Habits Settings**" to appear.
+    * Click **Moderate Habits Settings > Start New Challenge**. *(This menu item handles both first-time setup and resetting).*
+6. **Authorize the Script:**
+    * You will likely be asked for authorization the first time you run a menu item. Click **Continue** / **OK**.
+    * Choose the **correct Google Account** (the one granted access, if applicable).
+    * You may see a "**Google hasn't verified this app**" screen. This is normal for custom scripts. Click "**Advanced**", then "**Go to [Your Sheet Name] (unsafe)**".
+    * Review the permissions requested. It needs access to the current spreadsheet, ability to run triggers, display UI, and potentially connect to external services (for version check).
     * Click "**Allow**".
     * *Note: The script only runs within this Google Sheet document and only accesses its data.*
-8. **Set Up Habits:**
-    * Follow the prompts. A welcome message will appear, then a setup reminder.
-    * You are now in **Habit Ideation** mode.
+7. **Set Up Habits:**
+    * Follow the prompts (Welcome message, then Challenge Reset message).
+    * You are now in **Habit Ideation** mode (tracking columns hidden, settings visible).
     * Go to the `main` sheet.
-    * In the `activities` column (Column D), enter your desired habits. **Use one or more emojis** in the cells you want tracked. You can also add non-emoji text for labels or section headers (these won't be tracked).
-    * *(Optional)* Add detailed descriptions to your emoji cells using Right-Click > `Insert Note`.
-    * *(Optional)* Configure the `reset hour` (0-23) and `boost interval` (>=1) in the settings cells that appear on the right (Cells H6 and H8). Hover over them for explanatory notes.
-    * Once you're happy with your habits (emojis) and settings, **check the `set habits` checkbox** (Cell H3).
-    * A confirmation dialog will appear. Click **Yes** to start the challenge.
-9. **Start Tracking!** Your sheet is now ready for tracking. The setup cells will disappear, the tracking columns will appear, and today's date will be loaded.
+    * In the `activities` column (Column D), enter your desired habits using **emojis**. Only emoji cells are tracked. Add text labels in other rows if desired.
+    * *(Optional)* Configure `reset hour` (H6) and `boost interval` (H8).
+    * Once ready, **check the `set habits` checkbox** (H3).
+    * Confirm "Yes" when prompted.
+8. **Start Tracking!** The sheet will switch to Challenge Mode.
 
 ## 💡 Usage Guide
 
-* **Daily Tracking:** On the `main` sheet, check the boxes in the `completion` column for habits you've completed *for the date shown in the `date selector` cell*.
-* **Changing Dates:** Use the `date selector` cell (B9) to view or edit past days. Double-click for a calendar or type a date (YYYY-MM-DD). Data for the previously viewed date is saved automatically when you change dates *if* you modified completion status.
-* **Streaks & Buffers:** These are calculated automatically based on the `history` sheet. Missing a habit reduces its buffer the *next* day. If the buffer is 0 and you miss it, the current streak resets to 0 the next day. Buffers increase automatically based on your `boost interval` setting.
-* **Help:** Click **Moderate Habits Settings > Show Help (Current Page)** to open a sidebar with relevant information about the current sheet and mode.
-* **Detailed Guide:** For a more in-depth explanation and examples, refer to the guide (also linked in your approval email):
-  * **➡️ [Guide](http://tinyurl.com/moderate-habits) ⬅️**
+* **Daily Tracking:** On the `main` sheet, check boxes in the `completion` column for the date shown in the `date selector` (B9).
+* **Changing Dates:** Use the `date selector` (B9) to view/edit past data. Data saves automatically when changing dates *after* modifying completion status.
+* **Streaks & Buffers:** Calculated automatically based on `history`. Missing a habit reduces its buffer the *next* day. Buffer = 0 + Miss = Streak Reset. Buffers increase based on `boost interval`.
+* **Help:** Click **Moderate Habits Settings > Show Help (Current Page)** for the sidebar.
+* **Detailed Guide:** Refer to the guide linked in the approval email or here:
+  * **➡️ [Guide Link](http://tinyurl.com/moderate-habits) ⬅️**
 
 ## 🔧 Troubleshooting
 
-* **Menu Not Appearing:** The "Moderate Habits Settings" menu might take a few seconds (up to 30) to appear when you first open the sheet, especially the very first time. Try reloading the page if it takes longer.
+* **Menu Not Appearing:** Wait up to 30s on first open, or reload.
 * **Haven't Received Approval Email:** Please allow some time for manual processing of your access request. Remember to check your spam/junk folder for the email titled 'Access Granted to "moderate habits"'.
-* **Authorization Loop / Errors:** If authorization keeps failing or you encounter permission errors (especially after copying the sheet), ensure you requested access with the *same Google account* you are using to authorize the script in your copy. If issues persist, try removing the script's permissions from your Google Account settings (`Manage your Google Account -> Security -> Third-party apps with account access` -> Find the script by name -> Remove Access) and then re-authorize by running a menu item (like `Show Help`) again.
-* **Script Errors ("An error occurred..."):** If you see error messages, check the script's execution logs for details: **Extensions > Apps Script > Executions**. This often provides specific error messages useful for debugging.
-* **Performance:** Depending on the length of your challenge history, some actions (like changing dates far back or the daily reset) might take a few seconds to process. This is normal for Apps Script.
+* **Authorization Errors/Loops:** Ensure you used the correct Google Account. Try removing permissions via Google Account settings (`Security > Third-party apps`) and re-authorizing using a menu item. Ensure `appsscript.json` scopes are correct if modifying the script.
+* **Script Errors ("An error occurred..."):** Check **Extensions > Apps Script > Executions** for detailed error messages.
+* **Performance:** Allow a few seconds for processing, especially with long history.
 
 ## 🙏 Contributing
 
-Contributions, issues, and feature requests are welcome! Please feel free to open an issue on the [GitHub repository issues page](https://github.com/marcusrprojects/moderate_habits/issues) to report bugs or suggest improvements.
+Issues and feature requests are welcome! Please check the [GitHub repository issues page](https://github.com/marcusrprojects/moderate_habits/issues).
 
 ---
 
