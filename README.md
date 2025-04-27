@@ -26,17 +26,20 @@ It's designed for those who want a simple, customizable, and free way to monitor
 ## ⚙️ How It Works
 
 * **`main` Sheet:** Your primary interface for daily tracking and viewing current status.
-* **`history` Sheet:** A read-only log storing the data for each day.
-* **Google Apps Script:** The backend logic handling:
+* **`history` Sheet:** A read-only log storing the data for each day. All calculations are based on this sheet.
+*   **Google Apps Script:** The backend logic handling:
   * Daily resets (via time-driven trigger).
   * Calculations (streaks, buffers).
   * Data saving and propagation between `main` and `history`.
   * UI updates (help sidebar, dialogs).
   * Event handling (`onOpen`, `onEdit`).
+*   **Access Request:** The core script logic is contained in a private library. You need to request access so your copy of the sheet can utilize this library.
 
 ## 🚀 Setup Instructions
 
-1. **Prerequisites:** You need a Google Account.
+**IMPORTANT:** This tool uses a private Google Apps Script library. You must request access *first* before you can use the template sheet.
+
+1.  **Prerequisites:** You need a Google Account.
 2. **Copy the Sheet:**
     * Make a copy of the Moderate Habits Google Sheet template:
     * **➡️ [Link to your Shareable Google Sheet Template Here] ⬅️**
