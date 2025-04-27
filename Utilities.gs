@@ -40,8 +40,11 @@ const LibraryManager = {
           return null;
         }
       } else {
+        const errorInfo = `Response code: ${responseCode}${
+          content ? ", Content snippet: " + content.substring(0, 100) : ""
+        }`;
         LoggerManager.handleError(
-          `Failed to fetch version info. Response code: ${responseCode}.`,
+          `Failed to fetch version info. ${errorInfo}`,
           false
         );
         return null;
@@ -80,18 +83,14 @@ const TriggerManager = {
           trigger.getHandlerFunction() === this._HANDLER_FUNCTION_NAME
       );
     } catch (e) {
-      // Log non-fatal errors, but re-throw permission errors as they block functionality
       if (e.message.includes("Specified permissions are not sufficient")) {
-        LoggerManager.logDebug(
-          `Permission error during _checkTriggerExists: ${e.message}`
-        );
-        throw e; // Re-throw to be caught by caller
+        throw e;
       } else {
         LoggerManager.handleError(
-          `Error checking for existing triggers: ${e.message}`,
+          `Error checking triggers: ${e.message}`,
           false
         );
-        return false; // Assume not found on non-permission errors
+        return false;
       }
     }
   },
@@ -99,7 +98,7 @@ const TriggerManager = {
   /**
    * Deletes all existing triggers for the daily reset function for the current user/script/document.
    * @private
-   * @returns {boolean} True if deletion attempted successfully (even if none found), false on error.
+   * @returns {boolean} True if deletion attempted successfully (even if none found), false on non-permission error.
    * @throws Will re-throw permission errors if encountered.
    */
   _deleteExistingTriggers: function () {
@@ -111,27 +110,23 @@ const TriggerManager = {
           ScriptApp.deleteTrigger(trigger);
           deletedCount++;
           LoggerManager.logDebug(
-            `Deleted existing trigger with ID: ${trigger.getUniqueId()}`
+            `Deleted existing trigger: ${trigger.getUniqueId()}`
           );
         }
       });
       if (deletedCount === 0) {
         LoggerManager.logDebug("No existing triggers found to delete.");
       }
-      return true; // Deletion attempt finished
+      return true;
     } catch (e) {
-      // Log non-fatal errors, but re-throw permission errors
       if (e.message.includes("Specified permissions are not sufficient")) {
-        LoggerManager.logDebug(
-          `Permission error during _deleteExistingTriggers: ${e.message}`
-        );
-        throw e; // Re-throw to be caught by caller
+        throw e;
       } else {
         LoggerManager.handleError(
-          `Error deleting existing triggers: ${e.message}`,
+          `Error deleting triggers: ${e.message}`,
           false
         );
-        return false; // Indicate failure on non-permission errors
+        return false;
       }
     }
   },
@@ -139,32 +134,28 @@ const TriggerManager = {
   /**
    * Creates the daily time-based trigger if it doesn't exist.
    * Ensures only one trigger exists by deleting old ones first.
-   * Handles permission errors gracefully within its try/catch.
-   * @returns {boolean} True if the trigger exists or was successfully created, false if creation failed due to non-permission errors.
-   * @throws Will re-throw permission errors if encountered during trigger operations.
+   * Handles permission errors by re-throwing them to the caller.
+   * @returns {boolean} True if the trigger exists or was successfully created. False only if creation fails due to a configuration error (invalid reset hour).
+   * @throws Re-throws permission errors from internal checks/operations. Throws fatal error for invalid reset hour.
    */
   createTrigger: function () {
     LoggerManager.logDebug(">>> Entering TriggerManager.createTrigger");
     try {
       LoggerManager.logDebug("Attempting to delete existing triggers...");
-      if (!this._deleteExistingTriggers()) {
-        // Logged non-permission error during delete, proceed cautiously
-        LoggerManager.logDebug(
-          "Proceeding despite potential error during trigger deletion."
-        );
-      }
+      this._deleteExistingTriggers(); // Will throw permission error if needed
 
       LoggerManager.logDebug(
         "Checking if trigger exists after delete attempt..."
       );
       if (this._checkTriggerExists()) {
+        // Will throw permission error if needed
         LoggerManager.logDebug(
-          `Trigger '${this._HANDLER_FUNCTION_NAME}' exists (or delete/check failed). No creation needed.`
+          `Trigger '${this._HANDLER_FUNCTION_NAME}' already exists. No creation needed.`
         );
-        return true; // Trigger exists or prerequisite failed, consider it 'ok' for now
+        return true; // Trigger confirmed or already exists
       }
 
-      // Proceed to create if it doesn't exist
+      // Proceed to create
       const resetHour = PropertyManager.getPropertyNumber(
         PropertyKeys.RESET_HOUR
       );
@@ -175,11 +166,10 @@ const TriggerManager = {
         resetHour < 0 ||
         resetHour > 23
       ) {
-        // This is a configuration error, should be fatal for this operation
         LoggerManager.handleError(
           `Invalid reset hour (${resetHour}) in properties. Cannot create trigger.`,
           true
-        );
+        ); // Fatal config error
         return false; // Should be unreachable
       }
 
@@ -194,13 +184,12 @@ const TriggerManager = {
       LoggerManager.logDebug("Trigger created successfully.");
       return true; // Trigger created
     } catch (e) {
-      // Catch errors specifically from trigger operations (delete, check, create)
-      // These errors (especially permission ones) should be propagated up
+      // Catch and re-throw errors (likely permission errors from helpers or create)
       LoggerManager.handleError(
-        `Failed during trigger operations: ${e.message}. Ensure manifest includes 'script.scriptapp' and permissions were granted.`,
+        `Failed during trigger setup: ${e.message}. Ensure manifest includes 'script.scriptapp' and permissions were granted.`,
         true
       );
-      return false; // Should be unreachable due to throw
+      return false; // Should be unreachable
     }
   },
 };
@@ -208,10 +197,11 @@ Object.freeze(TriggerManager);
 
 /**
  * Manages logging and basic error reporting.
+ * @namespace LoggerManager
  */
 const LoggerManager = {
-  /** @constant {boolean} DEBUG_MODE - Set to true to enable debug logging. */
-  DEBUG_MODE: false, // Default to false for production releases
+  /** @constant {boolean} DEBUG_MODE - Set true for detailed logs, false for production. */
+  DEBUG_MODE: false, // <<< Set to true during development/debugging
 
   /**
    * Logs a message if DEBUG_MODE is true.
@@ -230,16 +220,13 @@ const LoggerManager = {
    * @param {boolean} [throwError=true] - Whether to throw the error and show UI alert.
    */
   handleError: function (errorMessage, throwError = true) {
-    Logger.log(`ERROR: ${errorMessage}`); // Always log the error
-
+    Logger.log(`ERROR: ${errorMessage}`);
     if (throwError) {
       try {
-        // Show a generic message to the user
         SpreadsheetApp.getUi().alert(
-          `An error occurred. Please check the logs (Extensions > Apps Script > Executions) for details or try again later.`
+          `An error occurred. Please check logs or contact support.`
         );
       } catch (uiError) {
-        // Ignore UI errors if running in a context without UI access
         Logger.log(`UI Alert failed: ${uiError.message}`);
       }
       // Throw the error to stop execution and provide stack trace in logs
@@ -257,9 +244,8 @@ const LoggerManager = {
    */
   logExecutionTime: function (func, funcName = "Anonymous Function") {
     if (!this.DEBUG_MODE) {
-      return func(); // Just execute if not debugging
+      return func();
     }
-
     const startTime = new Date().getTime();
     let result;
     let errorOccurred = false;
@@ -268,17 +254,16 @@ const LoggerManager = {
     } catch (e) {
       errorOccurred = true;
       LoggerManager.handleError(
-        `Error during timed execution of ${funcName}: ${e.message}`,
+        `Error during timed exec of ${funcName}: ${e.message}`,
         false
-      ); // Log error but let caller handle re-throwing if needed
-      throw e; // Re-throw the original error
+      );
+      throw e;
     } finally {
       const endTime = new Date().getTime();
-      const executionTime = endTime - startTime;
       this.logDebug(
-        `${funcName} ${
-          errorOccurred ? "failed" : "completed"
-        } in ${executionTime} ms.`
+        `${funcName} ${errorOccurred ? "failed" : "completed"} in ${
+          endTime - startTime
+        } ms.`
       );
     }
     return result;
