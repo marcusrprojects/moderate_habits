@@ -4,7 +4,8 @@ Moderate Habits is a habit-tracking application built entirely within Google She
 
 It's designed for those who want a simple, customizable, and free way to monitor their progress directly in a familiar spreadsheet environment.
 
-[![Moderate Habits Thumbnail](./assets/moderate-habits-thumbnail.png)](https://tinyurl.com/moderate-habits-tutorial)
+[![Moderate Habits Video Tutorial Thumbnail](./assets/moderate-habits-thumbnail.png)](https://tinyurl.com/moderate-habits-tutorial)
+*(Click image to watch setup tutorial)*
 
 ## ✨ Features
 
