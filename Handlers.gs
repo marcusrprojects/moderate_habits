@@ -9,7 +9,7 @@
 /**
  * Runs when the spreadsheet is opened. Adds the custom menu.
  * Handles basic setup like property loading on subsequent opens.
- * Relies on user clicking 'Begin' for first-time setup and trigger creation.
+ * Relies on user clicking 'Start New Challenge' for first-time setup and trigger creation.
  * @param {object} e The event object (unused but standard for onOpen).
  */
 function onOpen(e) {
@@ -18,21 +18,21 @@ function onOpen(e) {
     .createMenu("Moderate Habits Settings")
     .addItem("Show Help (Current Page)", "showHelpSidebar")
     .addSeparator()
-    .addItem("Start New Challenge", "beginOrStartNewChallenge") // Combined menu item
+    .addItem("Start New Challenge", "startNewChallenge")
     .addItem("Terminate Challenge", "terminateChallenge")
     .addSeparator()
     .addItem("Check for Updates", "versionCheck")
     .addToUi();
 
   // On subsequent opens (not first run), just load properties if needed.
-  // Trigger creation/check is handled by 'Begin' or manually.
+  // Trigger creation/check is handled by 'Start New Challenge' or manually.
   if (!isFirstRun()) {
     LoggerManager.logDebug("Not first run - loading properties.");
     // Accessing a property ensures PropertyManager loads if not already loaded.
     PropertyManager.getProperty(PropertyKeys.MODE); // Example access
   } else {
     LoggerManager.logDebug(
-      "First run detected by onOpen. User should click 'Begin / Start New Challenge'."
+      "First run detected by onOpen. User should click 'Start New Challenge'."
     );
   }
 }
@@ -44,6 +44,7 @@ function onOpen(e) {
  * @returns {boolean} True if it's the first run, false otherwise.
  */
 function isFirstRun() {
+  // Check directly to avoid initializing defaults just for this check
   const firstDate = PropertiesService.getDocumentProperties().getProperty(
     PropertyKeys.FIRST_CHALLENGE_DATE
   );
@@ -54,21 +55,21 @@ function isFirstRun() {
 }
 
 /**
- * Function mapped to the menu item "**Begin** / Start New Challenge".
- * Handles both the very first setup and resetting for a new challenge.
+ * Function mapped to the menu item "Start New Challenge".
+ * Handles both the very first setup (if needed) and resetting for subsequent new challenges.
  */
-function beginOrStartNewChallenge() {
+function startNewChallenge() {
   if (isFirstRun()) {
     // --- First Time Setup Flow ---
-    LoggerManager.logDebug("Executing first-time setup via Begin menu item...");
+    LoggerManager.logDebug(
+      "Executing first-time setup via Start New Challenge menu item..."
+    );
     try {
       // 1. Prompt for Initial Authorization (Spreadsheet, UI, etc.)
-      //    This happens implicitly when accessing services like SpreadsheetApp or PropertyManager
-      //    if not already granted. We'll access one to ensure the prompt appears *before* trigger creation attempt.
       LoggerManager.logDebug(
         "Accessing spreadsheet service to potentially trigger initial auth..."
       );
-      SpreadsheetApp.getActiveSpreadsheet().getName(); // Simple access
+      SpreadsheetApp.getActiveSpreadsheet().getName(); // Simple access to trigger auth if needed
 
       // 2. Show Welcome Message (Requires UI Auth)
       Messages.showAlert(MessageTypes.WELCOME_MESSAGE);
@@ -86,38 +87,45 @@ function beginOrStartNewChallenge() {
       PropertyManager.setDocumentProperties(); // Save initialized properties
 
       // 4. Attempt to Create Trigger (Requires script.scriptapp Auth)
-      //    THIS is where the re-auth prompt for the *new* scope should appear if manifest is correct.
       LoggerManager.logDebug(
         "Attempting to create trigger (may require re-authorization)..."
       );
-      TriggerManager.createTrigger(); // User MUST grant script.scriptapp here
+      const triggerCreated = TriggerManager.createTrigger(); // Call it here!
+      if (!triggerCreated) {
+        // Alert the user that trigger setup failed and they might need to do it manually
+        SpreadsheetApp.getUi().alert(
+          "Initial setup complete, but failed to create the daily reset trigger. Please ensure permissions were fully granted (you may need to run this setup again or use 'Setup Daily Reset Trigger' from the menu later)."
+        );
+      } else {
+        LoggerManager.logDebug("Initial trigger creation successful.");
+      }
 
       // 5. Initialize UI for Habit Setup
       LoggerManager.logDebug("Initializing Habit Ideation UI...");
       HabitManager.initializeSetHabitUI();
-      Messages.showAlert(MessageTypes.CHALLENGE_RESET); // Inform user
+      Messages.showAlert(MessageTypes.CHALLENGE_RESET); // Inform user to set habits
 
-      LoggerManager.logDebug("First-time setup completed successfully.");
+      LoggerManager.logDebug("First-time setup process finished.");
     } catch (error) {
+      // Use LoggerManager to handle the error display and potential throw
       LoggerManager.handleError(
-        `Error during first-time setup (beginOrStartNewChallenge): ${error.message}\n${error.stack}`,
+        `Error during first-time setup (startNewChallenge): ${error.message}\n${error.stack}`,
         true
       );
     }
   } else {
     // --- Start New Challenge (Reset) Flow ---
     LoggerManager.logDebug("Executing Start New Challenge (Reset)...");
-    const response = Messages.showAlert(MessageTypes.START_NEW_CHALLENGE);
+    const response = Messages.showAlert(MessageTypes.START_NEW_CHALLENGE); // Confirmation dialog
     if (response === Messages.ButtonTypes.YES) {
-      LoggerManager.logDebug("User confirmed starting new challenge.");
-      // Re-initialize properties and UI for habit setup
+      LoggerManager.logDebug("User confirmed starting new challenge (reset).");
+      // Re-initialize UI for habit setup
       HabitManager.initializeSetHabitUI(); // This resets UI, sets mode to Ideation
-      // Trigger should already exist, but let's ensure it's updated if resetHour changed during previous setup
-      // initializeSetHabitUI doesn't create trigger, _finalizeHabitSpread does.
+      // Trigger is NOT automatically created/updated here. User uses manual option if needed.
       Messages.showAlert(MessageTypes.CHALLENGE_RESET); // Inform user
       PropertyManager.setDocumentProperties(); // Save mode change etc.
     } else {
-      LoggerManager.logDebug("User cancelled starting new challenge.");
+      LoggerManager.logDebug("User cancelled starting new challenge (reset).");
       Messages.showAlert(MessageTypes.CHALLENGE_CANCELLED);
     }
   }
@@ -137,6 +145,7 @@ function onEdit(e) {
   );
 
   if (e && e.range) {
+    // Pass necessary info from the event object
     DataHandler.handleCellEdit(e.source.getActiveSheet(), e.range, e.oldValue);
   } else {
     LoggerManager.logDebug("onEdit event object or range was missing.");
