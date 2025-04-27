@@ -30,7 +30,7 @@ const HabitManager = {
     MainSheetConfig.resetChallengeDataUI();
 
     // 3. Show and configure the setter fields
-    this._toggleSetterFields(CellAction.SET); // Add labels, notes, checkbox
+    this._toggleSetterFields(CellAction.SET);
 
     // 4. Set the application mode
     PropertyManager.setProperty(PropertyKeys.MODE, ModeTypes.HABIT_IDEATION);
@@ -39,7 +39,6 @@ const HabitManager = {
     const historySheet = HistorySheetConfig._getSheet();
     const todayStr = DateManager.getTodayStr();
     const lastHistoryDate = DataHandler.getLastHistoryDate();
-
     if (
       historySheet &&
       lastHistoryDate &&
@@ -48,11 +47,8 @@ const HabitManager = {
       const lastRow = historySheet.getLastRow();
       const firstDataSheetRow = HistorySheetConfig.firstDataRow + 1;
       if (lastRow >= firstDataSheetRow) {
-        LoggerManager.logDebug(
-          `Clearing last history row (${lastRow}) as it matches today's date during reset.`
-        );
         try {
-          historySheet.deleteRow(lastRow); // Delete the row to avoid issues with propagation later
+          historySheet.deleteRow(lastRow);
           SpreadsheetApp.flush();
         } catch (e) {
           LoggerManager.handleError(
@@ -63,7 +59,6 @@ const HabitManager = {
       }
     }
 
-    LoggerManager.logDebug("Habit Ideation UI initialized.");
     // Properties will be saved by the caller (startNewChallenge)
   },
 
@@ -326,8 +321,6 @@ const HabitManager = {
       PropertyKeys.BOOST_INTERVAL,
       String(boostIntervalValue)
     );
-    // Recreate trigger with new reset hour
-    TriggerManager.createTrigger();
 
     // 2. Save the validated emoji spread
     this.updateEmojiSpreadProperty();
