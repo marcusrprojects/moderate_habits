@@ -50,29 +50,60 @@ const HistorySheetConfig = {
   // --- Basic Sheet Accessors ---
 
   /**
-   * Retrieves the Sheet object for the history sheet, using a cache.
+   * Retrieves the Sheet object for the relevant sheet (main or history) by iterating
+   * through all sheets. This method was chosen for reliability over getSheetByName,
+   * which exhibited issues in certain contexts after sheet copying.
+   *
    * @private
    * @returns {GoogleAppsScript.Spreadsheet.Sheet} The sheet object.
    * @throws {Error} if the sheet cannot be found.
    */
   _getSheet: function () {
-    if (
-      !this._sheet ||
-      this._sheet.getParent().getId() !==
-        SpreadsheetApp.getActiveSpreadsheet().getId()
-    ) {
-      // Re-fetch if sheet is null or spreadsheet context changed
-      this._sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(
-        this.sheetName
+    const sheetNameToFind = this.sheetName; // e.g., "main" or "history"
+    const activeSS = SpreadsheetApp.getActiveSpreadsheet();
+
+    // Critical check for active spreadsheet context
+    if (!activeSS) {
+      // If this happens, something is fundamentally wrong with the script environment
+      LoggerManager.handleError(
+        `FATAL: Cannot get Active Spreadsheet context in _getSheet for ${sheetNameToFind}.`,
+        true
       );
-      if (!this._sheet) {
-        // Throw a critical error if the history sheet is missing.
-        throw new Error(
-          `Sheet "${this.sheetName}" not found. Application cannot function.`
-        );
+      return null; // Should be unreachable due to throw
+    }
+    const activeSSName = activeSS.getName();
+    LoggerManager.logDebug(
+      `_getSheet: Locating sheet "${sheetNameToFind}" in SS: "${activeSSName}" via iteration.`
+    );
+
+    // Iterate through sheets to find the one with the matching name
+    const allSheets = activeSS.getSheets();
+    let foundSheet = null;
+    for (let i = 0; i < allSheets.length; i++) {
+      if (allSheets[i].getName() === sheetNameToFind) {
+        foundSheet = allSheets[i];
+        break; // Stop searching once found
       }
     }
-    return this._sheet;
+
+    // Handle case where sheet is not found even after iterating
+    if (!foundSheet) {
+      const allSheetNames = allSheets.map((s) => `"${s.getName()}"`); // Get names for error message
+      LoggerManager.handleError(
+        `Sheet "${sheetNameToFind}" was not found via ITERATION in Spreadsheet "${activeSSName}". Available sheets: [${allSheetNames.join(
+          ", "
+        )}]. Application cannot function.`,
+        true
+      );
+      return null; // Error thrown, unreachable
+    }
+
+    LoggerManager.logDebug(
+      `_getSheet: Successfully found sheet "${sheetNameToFind}" by iterating.`
+    );
+    // Skip caching when using iteration; return the found sheet directly.
+    // this._sheet = foundSheet; // Caching bypassed
+    return foundSheet;
   },
 
   /**

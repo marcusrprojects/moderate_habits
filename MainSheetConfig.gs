@@ -19,31 +19,22 @@ const MainSheetConfig = {
 
   /** @constant {number} firstDataInputRow - The 1-indexed row number where the first habit entry appears. */
   firstDataInputRow: 3,
-
   /** @constant {number} activityDataColumn - The 1-indexed column number for habit activity (emoji/description). */
   activityDataColumn: 4, // Column D
-
   /** @constant {number} completionDataColumn - The 1-indexed column number for completion checkboxes. */
   completionDataColumn: 5, // Column E
-
   /** @constant {number} bufferDataColumn - The 1-indexed column number for displaying buffer days. */
   bufferDataColumn: 6, // Column F
-
   /** @constant {number} streaksDataColumn - The 1-indexed column number where streak values are displayed. */
   streaksDataColumn: 2, // Column B
-
   /** @constant {string} currentStreakCell - The A1 notation for the cell displaying the current streak. */
   currentStreakCell: "B3",
-
   /** @constant {string} highestStreakCell - The A1 notation for the cell displaying the highest streak. */
   highestStreakCell: "B6",
-
   /** @constant {string} dateCell - The A1 notation for the cell used as the date selector. */
   dateCell: "B9",
-
   /** @constant {number} defaultBuffer - The initial buffer days each habit receives at the start of a challenge. */
   defaultBuffer: 1,
-
   /** @constant {number} resetHourDefault - The default hour (0-23) for the daily reset trigger if not set by the user. */
   resetHourDefault: 3, // 3 AM
 
@@ -128,36 +119,65 @@ const MainSheetConfig = {
   // --- Basic Sheet Accessors ---
 
   /**
-   * Retrieves the Sheet object for the main sheet, using a cache.
+   * Retrieves the Sheet object for the relevant sheet (main or history) by iterating
+   * through all sheets. This method was chosen for reliability over getSheetByName,
+   * which exhibited issues in certain contexts after sheet copying.
+   *
    * @private
    * @returns {GoogleAppsScript.Spreadsheet.Sheet} The sheet object.
    * @throws {Error} if the sheet cannot be found.
    */
   _getSheet: function () {
-    if (
-      !this._sheet ||
-      this._sheet.getParent().getId() !==
-        SpreadsheetApp.getActiveSpreadsheet().getId()
-    ) {
-      // Re-fetch if sheet is null or spreadsheet context changed
-      this._sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(
-        this.sheetName
+    const sheetNameToFind = this.sheetName; // e.g., "main" or "history"
+    const activeSS = SpreadsheetApp.getActiveSpreadsheet();
+
+    // Critical check for active spreadsheet context
+    if (!activeSS) {
+      // If this happens, something is fundamentally wrong with the script environment
+      LoggerManager.handleError(
+        `FATAL: Cannot get Active Spreadsheet context in _getSheet for ${sheetNameToFind}.`,
+        true
       );
-      if (!this._sheet) {
-        // Throw a critical error if the main sheet is missing.
-        throw new Error(
-          `Sheet "${this.sheetName}" not found. Application cannot function.`
-        );
+      return null; // Should be unreachable due to throw
+    }
+    const activeSSName = activeSS.getName();
+    LoggerManager.logDebug(
+      `_getSheet: Locating sheet "${sheetNameToFind}" in SS: "${activeSSName}" via iteration.`
+    );
+
+    // Iterate through sheets to find the one with the matching name
+    const allSheets = activeSS.getSheets();
+    let foundSheet = null;
+    for (let i = 0; i < allSheets.length; i++) {
+      if (allSheets[i].getName() === sheetNameToFind) {
+        foundSheet = allSheets[i];
+        break; // Stop searching once found
       }
     }
-    return this._sheet;
+
+    // Handle case where sheet is not found even after iterating
+    if (!foundSheet) {
+      const allSheetNames = allSheets.map((s) => `"${s.getName()}"`); // Get names for error message
+      LoggerManager.handleError(
+        `Sheet "${sheetNameToFind}" was not found via ITERATION in Spreadsheet "${activeSSName}". Available sheets: [${allSheetNames.join(
+          ", "
+        )}]. Application cannot function.`,
+        true
+      );
+      return null; // Error thrown, unreachable
+    }
+
+    LoggerManager.logDebug(
+      `_getSheet: Successfully found sheet "${sheetNameToFind}" by iterating.`
+    );
+    // Skip caching when using iteration; return the found sheet directly.
+    // this._sheet = foundSheet; // Caching bypassed
+    return foundSheet;
   },
 
   /**
    * Retrieves the value from a specific cell in the main sheet.
    * @private
-   * @param {string} cellA1Notation - The cell's A1 notation (e.g., "B3").
-   * @returns {*} The value of the specified cell, or null on error.
    */
   _getSheetValue: function (cellA1Notation) {
     try {
@@ -168,22 +188,18 @@ const MainSheetConfig = {
         `Failed to get value from cell ${cellA1Notation} on sheet ${this.sheetName}: ${e.message}`,
         false
       );
-      return null; // Return null on error
+      return null;
     }
   },
 
   /**
    * Sets the value in a specific cell in the main sheet.
    * @private
-   * @param {string} cellA1Notation - The cell's A1 notation.
-   * @param {*} value - The value to set.
-   * @returns {boolean} True if successful, false otherwise.
    */
   _setSheetValue: function (cellA1Notation, value) {
     try {
       const sheet = this._getSheet();
       sheet.getRange(cellA1Notation).setValue(value);
-      // SpreadsheetApp.flush(); // Generally avoid flush in low-level setters unless immediately required. Flush in higher-level operations.
       LoggerManager.logDebug(
         `Value set for cell ${cellA1Notation} on sheet ${this.sheetName}.`
       );
@@ -209,14 +225,9 @@ const MainSheetConfig = {
       const sheet = this._getSheet();
       const lastRow = sheet.getLastRow();
       const firstRow = this.firstDataInputRow;
-
       if (lastRow < firstRow) {
-        LoggerManager.logDebug(
-          `_getDynamicColumnRange: No data rows found (lastRow: ${lastRow}, firstDataRow: ${firstRow}) for column ${columnIndex} on sheet ${this.sheetName}.`
-        );
-        return null; // No data rows exist yet.
+        return null;
       }
-
       const numRows = lastRow - firstRow + 1;
       return sheet.getRange(firstRow, columnIndex, numRows, 1);
     } catch (e) {
