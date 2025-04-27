@@ -360,12 +360,13 @@ const DataHandler = {
   },
 
   /**
-   * Sets all core data (date, completion, buffer, streaks) on the main sheet.
-   * Takes 1D arrays for completion/buffer and maps them to the correct rows.
+   * Sets all core data (date, completion, buffer, streaks) on the main sheet UI.
+   * Takes 1D arrays for completion/buffer and maps them ONLY to the relevant habit rows.
+   * Non-habit rows in completion/buffer columns are NOT modified by this function.
    *
    * @param {string} dateStr - The date string (YYYY-MM-DD) to set.
-   * @param {Array<*>} completionData - 1D array of completion values for relevant rows.
-   * @param {Array<number>} bufferData - 1D array of buffer values for relevant rows.
+   * @param {Array<*>} completionData - 1D array of completion values, length must match relevantRows.
+   * @param {Array<number>} bufferData - 1D array of buffer values, length must match relevantRows.
    * @param {number} currentStreak - The current streak value.
    * @param {number} highestStreak - The highest streak value.
    */
@@ -378,37 +379,31 @@ const DataHandler = {
   ) {
     LoggerManager.logDebug(`setAllMainSheetData called for date: ${dateStr}`);
     // --- Input Validation ---
-    if (!DateManager._validateDateStr(dateStr, false)) {
-      // Allow setting future dates maybe? Validate format only.
-      LoggerManager.handleError(
-        `Invalid date string format for setAllMainSheetData: ${dateStr}`,
-        true
-      );
+    if (!DateManager._validateDateStr(dateStr, true)) {
       return;
-    }
+    } // Use validation with throw
     if (
       !ValidationUtils._validateCompletionAndBufferData(
         completionData,
-        bufferData
+        bufferData,
+        true
       )
     ) {
-      // Error handled in validation function
       return;
     }
     if (
       !ValidationUtils._validateCurrentAndHighestStreak(
         currentStreak,
-        highestStreak
+        highestStreak,
+        true
       )
     ) {
-      // Error handled in validation function
       return;
     }
 
-    const sheet = MainSheetConfig._getSheet();
-    if (!sheet) return;
-
+    const sheet = MainSheetConfig._getSheet(); // Throws if sheet not found
     const relevantRows = this.getRelevantRows();
+
     if (relevantRows.length !== completionData.length) {
       LoggerManager.handleError(
         `Mismatch between relevant rows (${relevantRows.length}) and provided data length (${completionData.length}) in setAllMainSheetData.`,
@@ -417,70 +412,52 @@ const DataHandler = {
       return;
     }
 
-    // --- Prepare Data for Batch Update ---
-    // Get full ranges to overwrite existing data correctly
-    const completionRange = MainSheetConfig.getCompletionDataRange();
-    const bufferRange = MainSheetConfig.getBufferDataRange();
+    // --- Prepare Data Updates ---
+    // Set single values first
+    this.setDateStr(dateStr); // Uses internal _setSheetValue
+    this.setCurrentStreak(currentStreak); // Uses internal _setSheetValue
+    this.setHighestStreak(highestStreak); // Uses internal _setSheetValue
 
-    // Initialize full-size arrays with empty/default values
-    const numSheetRows = completionRange ? completionRange.getNumRows() : 0; // Use actual range size
-    let paddedCompletionData = Array.from({ length: numSheetRows }, () => [""]); // Default empty
-    let paddedBufferData = Array.from({ length: numSheetRows }, () => [0]); // Default 0 or null? Let's use 0.
+    // Prepare updates ONLY for relevant rows in completion and buffer columns
+    const completionUpdates = {}; // { "E5": true, "E7": false, ... }
+    const bufferUpdates = {}; // { "F5": 1, "F7": 0, ... }
 
-    const firstDataSheetRow = MainSheetConfig.firstDataInputRow;
-
-    // Populate padded arrays at the correct indices
-    relevantRows.forEach((sheetRowIndex, i) => {
-      const rangeRowIndex = sheetRowIndex - firstDataSheetRow; // 0-based index within the range
-      if (rangeRowIndex >= 0 && rangeRowIndex < numSheetRows) {
-        paddedCompletionData[rangeRowIndex] = [completionData[i]]; // Wrap in array for setValues
-        paddedBufferData[rangeRowIndex] = [bufferData[i]]; // Wrap in array for setValues
-      } else {
-        LoggerManager.handleError(
-          `Row index mismatch during data padding in setAllMainSheetData. SheetRow: ${sheetRowIndex}, RangeIndex: ${rangeRowIndex}`,
-          false
-        );
-      }
+    relevantRows.forEach((rowNum, index) => {
+      const completionCellA1 = DataHandler._cellToA1Notation(
+        rowNum,
+        MainSheetConfig.completionDataColumn
+      );
+      const bufferCellA1 = DataHandler._cellToA1Notation(
+        rowNum,
+        MainSheetConfig.bufferDataColumn
+      );
+      completionUpdates[completionCellA1] = completionData[index];
+      bufferUpdates[bufferCellA1] = bufferData[index];
     });
 
-    // --- Perform Batch Update ---
+    // --- Perform Batch Updates using individual cells (less ideal) or RangeList (better) ---
+    // Note: RangeList might be slightly more complex to set up perfectly if performance is critical,
+    //       but setting individual cells is reliable, though slower for many rows. Let's try individual first for simplicity.
     try {
-      // Set Date and Streaks individually (simpler)
-      this.setDateStr(dateStr);
-      this.setCurrentStreak(currentStreak);
-      this.setHighestStreak(highestStreak);
-
-      // Set Completion and Buffer using ranges if they exist
-      if (completionRange && paddedCompletionData.length > 0) {
-        completionRange.setValues(paddedCompletionData);
-        LoggerManager.logDebug(
-          `Set completion data for range: ${completionRange.getA1Notation()}`
-        );
-      } else if (relevantRows.length > 0) {
-        // Only log error if data was expected
-        LoggerManager.logDebug(
-          `Completion range not found or empty, skipping setValues.`
-        );
-      }
-
-      if (bufferRange && paddedBufferData.length > 0) {
-        bufferRange.setValues(paddedBufferData);
-        LoggerManager.logDebug(
-          `Set buffer data for range: ${bufferRange.getA1Notation()}`
-        );
-      } else if (relevantRows.length > 0) {
-        LoggerManager.logDebug(
-          `Buffer range not found or empty, skipping setValues.`
-        );
-      }
-
-      SpreadsheetApp.flush(); // Flush all changes at once
       LoggerManager.logDebug(
-        `setAllMainSheetData completed successfully for ${dateStr}.`
+        "Setting completion/buffer data for relevant rows..."
+      );
+      // Batch setting individual cells is still faster than separate API calls
+      Object.entries(completionUpdates).forEach(([cellA1, value]) => {
+        sheet.getRange(cellA1).setValue(value);
+      });
+      Object.entries(bufferUpdates).forEach(([cellA1, value]) => {
+        sheet.getRange(cellA1).setValue(value);
+      });
+
+      SpreadsheetApp.flush(); // Flush all changes together
+      LoggerManager.logDebug(
+        `setAllMainSheetData completed successfully for ${dateStr}. Updated ${relevantRows.length} habit rows.`
       );
     } catch (e) {
       LoggerManager.handleError(
-        `Error during batch update in setAllMainSheetData: ${e.message}`
+        `Error during batch update in setAllMainSheetData: ${e.message}`,
+        true
       );
     }
   },
