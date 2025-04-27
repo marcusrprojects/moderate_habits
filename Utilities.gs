@@ -1,675 +1,788 @@
 /**
- * Manages version control and checks for the latest version from an online CSV file.
+ * @fileoverview General utility modules including version checking, trigger management,
+ * logging, date handling, and property management.
  */
-const LibraryManager = {
-  /**
-   * The latest version number of the script.
-   *
-   * @constant {string}
-   * @default
-   */
-  LATEST_VERSION: "6",
 
-  /**
-   * The URL pointing to a CSV file that contains the latest version information.
-   *
-   * The CSV file is hosted on Google Sheets and the data can be fetched programmatically
-   * to check if the user's version is up to date.
-   *
-   * @constant {string}
-   * @default
-   */
-  LATEST_VERSION_CSV: `https://docs.google.com/spreadsheets/d/e/2PACX-1vTw2YxOfHTpUCcczl3G-rSUNhUe6OEMs1WhLypmZ4uMU_MBMbhqEeWfNvI7MdwK4ln-JRDhXPhhTCMF/pub?gid=0&single=true&output=csv`,
-
-  /**
-   * Fetches the current version information from the CSV file hosted online.
-   * @returns {string} - The current version number.
-   */
-  fetchVersionInfo: function () {
-    const response = UrlFetchApp.fetch(this.LATEST_VERSION_CSV);
-    const csvData = Utilities.parseCsv(response.getContentText());
-
-    // Assuming the version number is in the first cell of the CSV
-    const currentVersion = csvData[0][0];
-    Logger.log("Current Version: " + currentVersion);
-
-    return currentVersion;
-  },
-};
+/** OnlyCurrentDoc */
 
 /**
- * Manages the creation and validation of time-based triggers
- * for automatically resetting the checklist daily.
+ * Manages checking for updates against a remote source.
+ */
+const LibraryManager = {
+  /** @constant {string} LATEST_VERSION - The current hardcoded version of this script. */
+  LATEST_VERSION: "6", // Update this when releasing a new version
+
+  /** @constant {string} LATEST_VERSION_CSV_URL - URL to fetch the latest version number. */
+  LATEST_VERSION_CSV_URL: `https://docs.google.com/spreadsheets/d/e/2PACX-1vTw2YxOfHTpUCcczl3G-rSUNhUe6OEMs1WhLypmZ4uMU_MBMbhqEeWfNvI7MdwK4ln-JRDhXPhhTCMF/pub?gid=0&single=true&output=csv`,
+
+  /**
+   * Fetches the latest version number from the remote CSV.
+   * @returns {string | null} The latest version number as a string, or null on error.
+   */
+  fetchVersionInfo: function () {
+    try {
+      const response = UrlFetchApp.fetch(this.LATEST_VERSION_CSV_URL, {
+        muteHttpExceptions: true,
+      });
+      const responseCode = response.getResponseCode();
+      const content = response.getContentText();
+
+      if (responseCode === 200) {
+        const csvData = Utilities.parseCsv(content);
+        if (csvData && csvData.length > 0 && csvData[0].length > 0) {
+          const currentVersion = String(csvData[0][0]).trim();
+          LoggerManager.logDebug(`Fetched latest version: ${currentVersion}`);
+          return currentVersion;
+        } else {
+          LoggerManager.handleError(
+            "Failed to parse version data from CSV.",
+            false
+          );
+          return null;
+        }
+      } else {
+        LoggerManager.handleError(
+          `Failed to fetch version info. Response code: ${responseCode}, Content: ${content}`,
+          false
+        );
+        return null;
+      }
+    } catch (e) {
+      LoggerManager.handleError(
+        `Error fetching version info: ${e.message}`,
+        false
+      );
+      return null;
+    }
+  },
+};
+Object.freeze(LibraryManager);
+
+/**
+ * Manages time-driven triggers for the script.
  */
 const TriggerManager = {
+  _HANDLER_FUNCTION_NAME: "renewChecklistForToday",
+
   /**
-   * Checks if the 'renewChecklistForToday' trigger already exists for the user.
-   * @returns {boolean} - True if the trigger exists, false otherwise.
+   * Checks if the daily reset trigger already exists.
+   * @returns {boolean} True if the trigger exists, false otherwise.
    */
-  checkTriggerExists: function () {
-    const triggers = ScriptApp.getUserTriggers(SpreadsheetApp.getActive());
-    return triggers.some(
-      (trigger) => trigger.getHandlerFunction() === "renewChecklistForToday"
-    );
+  _checkTriggerExists: function () {
+    try {
+      const triggers = ScriptApp.getUserTriggers(SpreadsheetApp.getActive());
+      return triggers.some(
+        (trigger) =>
+          trigger.getHandlerFunction() === this._HANDLER_FUNCTION_NAME
+      );
+    } catch (e) {
+      LoggerManager.handleError(
+        `Error checking for existing triggers: ${e.message}`,
+        false
+      );
+      return false; // Assume it doesn't exist on error
+    }
   },
 
   /**
-   * Creates a time-based trigger that resets the checklist every day at a specified hour.
-   * This ensures that the daily checklist is automatically updated at a consistent time.
-   *
-   * The hour is set using the resetHour, which allows customization of the reset time.
-   * The trigger is set to fire daily at the specified hour.
+   * Deletes all existing triggers for the daily reset function.
+   * @private
+   */
+  _deleteExistingTriggers: function () {
+    try {
+      const triggers = ScriptApp.getUserTriggers(SpreadsheetApp.getActive());
+      triggers.forEach((trigger) => {
+        if (trigger.getHandlerFunction() === this._HANDLER_FUNCTION_NAME) {
+          ScriptApp.deleteTrigger(trigger);
+          LoggerManager.logDebug(
+            `Deleted existing trigger with ID: ${trigger.getUniqueId()}`
+          );
+        }
+      });
+    } catch (e) {
+      LoggerManager.handleError(
+        `Error deleting existing triggers: ${e.message}`,
+        false
+      );
+    }
+  },
+
+  /**
+   * Creates the daily time-based trigger if it doesn't exist.
+   * Uses the reset hour defined in properties. Deletes old triggers first.
    */
   createTrigger: function () {
-    if (this.checkTriggerExists()) {
-      LoggerManager.logDebug(`Trigger already exists.`);
+    this._deleteExistingTriggers(); // Ensure only one trigger exists
+
+    if (this._checkTriggerExists()) {
+      LoggerManager.logDebug(
+        `Trigger '${this._HANDLER_FUNCTION_NAME}' already exists.`
+      );
       return;
     }
 
-    LoggerManager.logDebug("Creating trigger...");
+    const resetHour = PropertyManager.getPropertyNumber(
+      PropertyKeys.RESET_HOUR
+    );
+    // Validate resetHour (0-23)
+    if (resetHour === null || resetHour < 0 || resetHour > 23) {
+      LoggerManager.handleError(
+        `Invalid reset hour (${resetHour}) found in properties. Cannot create trigger. Using default ${MainSheetConfig.resetHourDefault}.`
+      );
+      // Optionally default here, or just fail. Let's try defaulting.
+      // resetHour = MainSheetConfig.resetHourDefault;
+      // For safety, let's just not create the trigger if the value is bad.
+      return;
+    }
 
-    // Create a new time-based trigger to call 'renewChecklistForToday' at a specified hour every day
-    ScriptApp.newTrigger("renewChecklistForToday")
-      .timeBased()
-      .atHour(PropertyManager.getPropertyNumber(PropertyKeys.RESET_HOUR)) // Set the time you want the checklist to reset (e.g., 0 for midnight)
-      .everyDays(1)
-      .create();
+    LoggerManager.logDebug(
+      `Creating time-driven trigger for ${this._HANDLER_FUNCTION_NAME} at hour ${resetHour}.`
+    );
+    try {
+      ScriptApp.newTrigger(this._HANDLER_FUNCTION_NAME)
+        .timeBased()
+        .atHour(resetHour)
+        .everyDays(1)
+        .create();
+      LoggerManager.logDebug("Trigger created successfully.");
+    } catch (e) {
+      LoggerManager.handleError(`Failed to create trigger: ${e.message}`, true);
+    }
   },
 };
+Object.freeze(TriggerManager);
 
 /**
- * LoggerManager object for handling logging and error management.
- * Includes methods for loading properties, retrieving property values, and managing errors.
+ * Manages logging and basic error reporting.
  */
 const LoggerManager = {
-  /**
-   * Switch this on or off for debugging.
-   * When set to `true`, debugging messages will be logged via the Logger.
-   * Set to `false` to turn off debugging logs.
-   *
-   * @constant {boolean}
-   */
-  DEBUG_MODE: true,
+  /** @constant {boolean} DEBUG_MODE - Set to true to enable debug logging. */
+  DEBUG_MODE: false, // Default to false for production releases
 
   /**
-   * Logs a debug message if `DEBUG_MODE` is set to `true`.
-   *
-   * @param {string} message - The message to log to the Logger.
+   * Logs a message if DEBUG_MODE is true.
+   * @param {string} message - The message to log.
    */
   logDebug: function (message) {
     if (this.DEBUG_MODE) {
-      Logger.log(message);
+      Logger.log(`DEBUG: ${message}`);
     }
   },
 
   /**
-   * Handles errors by showing an alert to the user and throwing an error to stop execution.
-   * @param {string} errorMessage - The error message to display and throw.
-   * @param {boolean} throwError - Whether to throw an error or return false.
-   * @returns {boolean} - Always returns false.
+   * Handles errors. Logs the error message. If throwError is true,
+   * shows a generic alert to the user and throws the error to stop execution.
+   * @param {string} errorMessage - The detailed error message.
+   * @param {boolean} [throwError=true] - Whether to throw the error and show UI alert.
    */
   handleError: function (errorMessage, throwError = true) {
-    if (throwError) {
-      // Show the error message to the user
-      this.logDebug(errorMessage);
-      SpreadsheetApp.getUi().alert(
-        `An error has occurred in processing this request.`
-      );
+    Logger.log(`ERROR: ${errorMessage}`); // Always log the error
 
-      // Throw the error to stop execution
+    if (throwError) {
+      try {
+        // Show a generic message to the user
+        SpreadsheetApp.getUi().alert(
+          `An error occurred. Please check the logs (Extensions > Apps Script > Executions) for details or try again later.`
+        );
+      } catch (uiError) {
+        // Ignore UI errors if running in a context without UI access
+        Logger.log(`UI Alert failed: ${uiError.message}`);
+      }
+      // Throw the error to stop execution and provide stack trace in logs
       throw new Error(errorMessage);
-    } else {
-      this.logDebug(`ERROR: ${errorMessage}`);
     }
+    // If throwError is false, execution continues after logging.
   },
 
   /**
-   * Wraps a function call to measure and log the execution time.
-   * @param {Function} func - The function to be executed.
+   * Wraps a function call to measure and log its execution time.
+   * Only logs if DEBUG_MODE is true.
+   * @param {Function} func - The function to execute.
+   * @param {string} [funcName='Anonymous Function'] - Optional name for logging.
    * @returns {*} The result of the function execution.
    */
-  logExecutionTime: function (funcCall) {
-    const startTime = new Date();
+  logExecutionTime: function (func, funcName = "Anonymous Function") {
+    if (!this.DEBUG_MODE) {
+      return func(); // Just execute if not debugging
+    }
 
-    // Execute the function call
-    const result = funcCall();
-
-    const endTime = new Date();
-    const executionTime = endTime - startTime;
-
-    // Log the execution time
-    const funcName =
-      funcCall.name || String(funcCall).slice(6).trim() || "Anonymous Function";
-    this.logDebug(`${funcName} took ${executionTime} ms to execute.`);
-
-    return result; // Return the result of the function
+    const startTime = new Date().getTime();
+    let result;
+    let errorOccurred = false;
+    try {
+      result = func();
+    } catch (e) {
+      errorOccurred = true;
+      LoggerManager.handleError(
+        `Error during timed execution of ${funcName}: ${e.message}`,
+        false
+      ); // Log error but let caller handle re-throwing if needed
+      throw e; // Re-throw the original error
+    } finally {
+      const endTime = new Date().getTime();
+      const executionTime = endTime - startTime;
+      this.logDebug(
+        `${funcName} ${
+          errorOccurred ? "failed" : "completed"
+        } in ${executionTime} ms.`
+      );
+    }
+    return result;
   },
 };
+Object.freeze(LoggerManager);
 
 /**
- * The `DateManager` constant is responsible for handling all operations related to date formatting
- * and manipulation within the Google Sheets environment. This includes converting dates to
- * ISO strings, deserializing raw date values, and managing any date-related logic that
- * needs to be standardized across the application.
- *
- * The `DateManager` ensures that date handling is consistent, minimizing errors related to
- * date formatting or misinterpretation. It abstracts the complexity of date manipulation
- * and provides a clean interface for other parts of the code to interact with dates.
+ * Manages date operations, formatting, and validation.
  */
 const DateManager = {
   /**
-   * Validates if the input is a valid date string in the format YYYY-MM-DD.
-   * The input must be a formatted date string and cannot be a Date object.
-   *
-   * @param {any} date - The data to validate.
-   * @param {boolean} [throwError=true] - Whether to throw an error on invalid input.
-   * @returns {boolean} True if valid, False otherwise.
+   * Validates if a string is in YYYY-MM-DD format and represents a real date.
+   * @param {string} dateStr - The string to validate.
+   * @param {boolean} [throwError=true] - Whether to log/throw error on failure.
+   * @returns {boolean} True if valid.
    */
-  __validateDateStr: function (dateStr) {
+  _validateDateStr: function (dateStr, throwError = true) {
+    if (typeof dateStr !== "string") {
+      if (throwError)
+        LoggerManager.handleError(
+          `Invalid date string type: Expected string, got ${typeof dateStr}`,
+          true
+        );
+      return false;
+    }
     const regex = /^\d{4}-\d{2}-\d{2}$/;
-    return (
-      typeof dateStr === "string" &&
-      regex.test(dateStr) &&
-      !isNaN(Date.parse(dateStr))
-    );
+    if (!regex.test(dateStr)) {
+      if (throwError)
+        LoggerManager.handleError(
+          `Invalid date string format: ${dateStr}. Expected YYYY-MM-DD.`,
+          true
+        );
+      return false;
+    }
+    // Check if it parses to a valid date
+    const date = new Date(dateStr + "T00:00:00Z"); // Use UTC to avoid timezone issues in parsing check
+    if (isNaN(date.getTime())) {
+      if (throwError)
+        LoggerManager.handleError(
+          `Invalid date value: ${dateStr}. Does not represent a real date.`,
+          true
+        );
+      return false;
+    }
+    // Optional: Check if the parsed date parts match the input string parts to catch month/day rollovers like '2023-02-30'
+    const [year, month, day] = dateStr.split("-").map(Number);
+    if (
+      date.getUTCFullYear() !== year ||
+      date.getUTCMonth() + 1 !== month ||
+      date.getUTCDate() !== day
+    ) {
+      if (throwError)
+        LoggerManager.handleError(
+          `Invalid date value: ${dateStr}. Month/day out of range.`,
+          true
+        );
+      return false;
+    }
+
+    return true;
   },
 
   /**
-   * Validates whether the given date is within the allowed range (firstDate <= date <= today).
-   *
-   * This function ensures that the input `date` (which must be a valid Date object) is within the
-   * allowable range. The range is defined as the period between the first recorded date in the
-   * history sheet and the current date (today). If the history sheet is empty, today's date
-   * is used as the first date.
-   *
+   * Validates if a Date object is within the allowed challenge range (first challenge date to today).
    * @param {Date} date - The Date object to validate.
-   * @returns {boolean} True if the date is valid and falls within the allowed range, False otherwise.
+   * @param {boolean} [throwError=true] - Whether to log/throw error on failure.
+   * @returns {boolean} True if valid.
    */
   _validateDateRange: function (date, throwError = true) {
-    // Ensure the input date is a valid Date object.
-    if (!UtilsManager.__validateDate(date)) {
-      LoggerManager.handleError(`Invalid date input.`, throwError);
-      return false;
-    }
-
-    const today = this.getToday();
-    const firstDate = HistorySheetConfig.getFirstDate() || today; // Default to today if no history
-
-    LoggerManager.logDebug(
-      `_validateDateRange: input date is ${date}, compared to the first date of ${firstDate} and today ${today}`
-    );
-
-    // Check if the date is within the valid range (firstDate <= date <= today)
-    if (date < firstDate || date > today) {
+    if (!ValidationUtils._validateDate(date)) {
       LoggerManager.handleError(
-        `Invalid date: The date must be between ${firstDate} and ${today}, but is ${date} instead.`,
+        `Invalid date object passed to _validateDateRange.`,
         throwError
       );
       return false;
     }
 
-    return true; // Date is valid
+    const today = this.getToday();
+    const firstDate = DataHandler.getFirstChallengeDate(); // Get from DataHandler
+
+    if (!firstDate) {
+      LoggerManager.handleError(
+        `Cannot validate date range: First challenge date is not set.`,
+        throwError
+      );
+      // Allow validation if date is today or earlier? Or always fail? Let's fail.
+      return false;
+    }
+
+    // Normalize dates to midnight UTC for comparison to avoid timezone issues
+    const dateUTC = new Date(
+      Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
+    );
+    const firstDateUTC = new Date(
+      Date.UTC(
+        firstDate.getFullYear(),
+        firstDate.getMonth(),
+        firstDate.getDate()
+      )
+    );
+    const todayUTC = new Date(
+      Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())
+    );
+
+    if (dateUTC < firstDateUTC || dateUTC > todayUTC) {
+      const msg = `Invalid date range: Date ${this.determineFormattedDate(
+        date
+      )} must be between ${this.determineFormattedDate(
+        firstDate
+      )} and ${this.determineFormattedDate(today)}.`;
+      LoggerManager.handleError(msg, throwError);
+      return false;
+    }
+    return true;
   },
 
   /**
-   * Validates whether the given date string is within the allowed range (firstDate <= dateStr <= today).
-   *
-   * This function converts the input `dateStr` (expected in `YYYY-MM-DD` format) into a Date object,
-   * then checks whether it falls within the valid date range: from the first date recorded in the history
-   * sheet up to today's date.
-   *
-   * @param {string} dateStr - The date string to validate, in `YYYY-MM-DD` format.
-   * @returns {boolean} True if the date string is valid and falls within the allowed range, False otherwise.
+   * Validates if a date string (YYYY-MM-DD) is within the allowed challenge range.
+   * @param {string} dateStr - The date string to validate.
+   * @param {boolean} [throwError=true] - Whether to log/throw error on failure.
+   * @returns {boolean} True if valid.
    */
   _validateDateStrRange: function (dateStr, throwError = true) {
-    if (!this.__validateDateStr(dateStr)) {
+    if (!this._validateDateStr(dateStr, throwError)) {
+      return false; // Format/value validation failed
+    }
+    try {
+      const date = this.determineDate(dateStr); // Convert string to Date object
+      return this._validateDateRange(date, throwError); // Use Date object validation
+    } catch (e) {
       LoggerManager.handleError(
-        `_validateDateStrRange: Date string ${dateStr} is invalid.`,
+        `Error validating date string range for ${dateStr}: ${e.message}`,
         throwError
       );
       return false;
     }
-
-    const today = this.getToday();
-    const firstDate = HistorySheetConfig.getFirstDate() || today; // Default to today if no history
-
-    // Parse the date string into a Date object, and validate it.
-    const date = this.determineDate(dateStr);
-
-    LoggerManager.logDebug(
-      `_validateDateStrRange: input date is ${date}, compared to the first date of ${firstDate} and today ${today}`
-    );
-
-    // Check if the date is within the valid range (firstDate <= date <= today)
-    if (date < firstDate || date > today) {
-      LoggerManager.handleError(
-        `_validateDateStrRange: Invalid date: The date must be between ${firstDate} and ${today}, but is ${date} instead.`,
-        throwError
-      );
-      return false;
-    }
-
-    return true; // Date is valid
   },
 
   /**
-   * Determines the appropriate method for formatting a given date input.
-   * It will either deserialize the input or format it into an ISO string (YYYY-MM-DD).
-   *
-   * @param {Date|number|string} dateInput - The date input, which can be a Date object, a serialized date number, or a date string.
-   * @returns {string} - The formatted date string in YYYY-MM-DD format.
-   */
-  determineFormattedDate: function (dateInput) {
-    const date = this.determineDate(dateInput);
-    return this._formatDateToISOString(date);
-  },
-
-  /**
-   * Determines whether to deserialize the date input or use it as a Date object.
-   * Converts serialized date numbers or date strings to a Date object if necessary.
-   *
-   * @param {Date|number|string} dateInput - The date input, which can be either a Date object, serialized date number, or date string.
-   * @returns {Date} - The Date object.
+   * Converts various date inputs (Date object, string, Sheets serial number) into a Date object normalized to midnight UTC.
+   * @param {Date|string|number} dateInput - The input date.
+   * @returns {Date} The normalized Date object.
+   * @throws {Error} if the input cannot be parsed.
    */
   determineDate: function (dateInput) {
-    if (dateInput instanceof Date) {
-      return dateInput;
-    }
+    let year, month, day;
 
-    if (
+    if (dateInput instanceof Date && !isNaN(dateInput)) {
+      // Input is already a valid Date object
+      year = dateInput.getFullYear();
+      month = dateInput.getMonth(); // 0-indexed
+      day = dateInput.getDate();
+    } else if (
       typeof dateInput === "string" &&
-      !isNaN(new Date(dateInput).getTime())
+      this._validateDateStr(dateInput, false)
     ) {
-      const parts = dateInput.split("-");
-      const year = parseInt(parts[0], 10);
-      const month = parseInt(parts[1], 10) - 1; // Months are 0-indexed in JS
-      const day = parseInt(parts[2], 10);
-      return new Date(year, month, day);
+      // Input is a 'YYYY-MM-DD' string
+      [year, month, day] = dateInput.split("-").map(Number);
+      month -= 1; // Adjust month to 0-indexed
+    } else if (typeof dateInput === "number" && dateInput > 0) {
+      // Assume Sheets Serial Number (days since Dec 30, 1899)
+      // Formula: (Serial Number - 25569) * 86400000 = Milliseconds since Unix Epoch UTC
+      // Need to handle timezone carefully. Create date from components.
+      const jsDate = new Date(Math.round((dateInput - 25569) * 86400 * 1000));
+      // Extract components in UTC to avoid local timezone shifts affecting the date parts
+      year = jsDate.getUTCFullYear();
+      month = jsDate.getUTCMonth(); // 0-indexed
+      day = jsDate.getUTCDate();
+    } else {
+      throw new Error(
+        `Invalid date input type or value: ${dateInput} (Type: ${typeof dateInput})`
+      );
     }
 
-    if (
-      typeof dateInput === "number" ||
-      (typeof dateInput === "string" && !isNaN(dateInput))
-    ) {
-      // If the input is a number, treat it as a serialized date and deserialize it.
-      return this._deserializeDate(dateInput);
-    }
-
-    if (
-      typeof dateInput === "object" &&
-      !isNaN(new Date(dateInput).getTime())
-    ) {
-      const date = new Date(dateInput);
-      return new Date(date.getFullYear(), date.getMonth(), date.getDate()); // Sets time to 00:00:00
-    }
-
-    LoggerManager.handleError(
-      `Invalid date input type. Given ${dateInput} of type ${typeof dateInput}. Must be a Date object or a serialized date number.`
-    );
+    // Return a new Date object set to midnight UTC for consistency
+    return new Date(Date.UTC(year, month, day));
   },
 
   /**
-   * Converts a Date object into a string in the YYYY-MM-DD format (ISO 8601).
-   *
-   * @param {Date} date - The Date object to format.
-   * @returns {string} - The formatted date string in YYYY-MM-DD format.
+   * Formats a Date object into a "YYYY-MM-DD" string.
+   * @param {Date} date - The Date object.
+   * @returns {string} The formatted date string.
    */
-  _formatDateToISOString: function (date) {
-    return date.toISOString().split("T")[0];
+  determineFormattedDate: function (date) {
+    if (!ValidationUtils._validateDate(date)) {
+      throw new Error("Invalid Date object passed to determineFormattedDate.");
+    }
+    // Use UTC methods to avoid timezone shifting the date during formatting
+    const year = date.getUTCFullYear();
+    const month = String(date.getUTCMonth() + 1).padStart(2, "0"); // 0-indexed month
+    const day = String(date.getUTCDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
   },
 
   /**
-   * Deserializes a serialized date number into a Date object.
-   *
-   * @param {number} serializedDate - The serialized date value (Excel-style serial number).
-   * @returns {Date} - The deserialized Date object.
+   * Calculates the date for the day before the given date.
+   * @param {Date|string} dateInput - The reference date (Date object or YYYY-MM-DD string).
+   * @returns {Date} The Date object for the previous day.
    */
-  _deserializeDate: function (serializedDate) {
-    // Multiply by 86400000 (milliseconds per day) to convert serial number to milliseconds
-    return new Date((serializedDate - 25569) * 86400 * 1000);
-  },
-
-  /**
-   * Returns the previous date as a Date object.
-   *
-   * @param {string|Date} dateStr - The date string (YYYY-MM-DD) or Date object to calculate the previous date from.
-   * @returns {Date} - The previous date as a Date object.
-   */
-  getPreviousDate: function (dateStr) {
-    // Convert dateStr to a Date object
-    const previousDay = this.determineDate(dateStr);
-    // Create a Date object from the date string and subtract one day
-    previousDay.setDate(previousDay.getDate() - 1); // Subtract 1 day
-    LoggerManager.logDebug(
-      `getPreviousDate: passed in date ${dateStr} v.s. determined previous date ${previousDay}`
-    );
+  getPreviousDate: function (dateInput) {
+    const date = this.determineDate(dateInput); // Ensure we have a normalized Date object
+    const previousDay = new Date(date); // Clone
+    previousDay.setUTCDate(date.getUTCDate() - 1); // Subtract one day using UTC
     return previousDay;
   },
 
   /**
-   * Calculates and returns the previous date as a formatted string (YYYY-MM-DD).
-   *
-   * @param {string} dateStr - The date string in `YYYY-MM-DD` format.
-   * @returns {string} - The formatted previous date string in `YYYY-MM-DD` format.
+   * Calculates the date for the day after the given date.
+   * @param {Date|string} dateInput - The reference date (Date object or YYYY-MM-DD string).
+   * @returns {Date} The Date object for the next day.
    */
-  getPreviousDateStr: function (dateStr) {
-    // Create a Date object from the date string
-    const previousDay = this.getPreviousDate(dateStr);
-
-    // Format the previous day
-    return this.determineFormattedDate(previousDay);
+  getNextDate: function (dateInput) {
+    const date = this.determineDate(dateInput); // Ensure we have a normalized Date object
+    const nextDay = new Date(date); // Clone
+    nextDay.setUTCDate(date.getUTCDate() + 1); // Add one day using UTC
+    return nextDay;
   },
 
   /**
-   * Returns the current timestamp in ISO 8601 format.
-   *
-   * This method captures the current date and time and formats it
-   * to an ISO 8601 string, which includes the full timestamp with
-   * the year, month, day, hours, minutes, seconds, and milliseconds
-   * in the format `YYYY-MM-DDTHH:mm:ss.sssZ`.
-   *
-   * Example output: '2024-09-07T12:34:56.789Z'
-   *
-   * @returns {string} - The current timestamp in ISO 8601 format.
+   * Calculates the previous date and returns it as a formatted string (YYYY-MM-DD).
+   * @param {string} dateStr - The reference date string (YYYY-MM-DD).
+   * @returns {string} The formatted previous date string.
+   */
+  getPreviousDateStr: function (dateStr) {
+    const previousDate = this.getPreviousDate(dateStr);
+    return this.determineFormattedDate(previousDate);
+  },
+
+  /**
+   * Calculates the difference in days between two dates.
+   * Result is positive if date2 is after date1.
+   * @param {Date|string} date1Input - The earlier date.
+   * @param {Date|string} date2Input - The later date.
+   * @returns {number} The number of days between the dates.
+   */
+  daysBetween: function (date1Input, date2Input) {
+    const date1 = this.determineDate(date1Input); // Normalized to midnight UTC
+    const date2 = this.determineDate(date2Input); // Normalized to midnight UTC
+    const msPerDay = 1000 * 60 * 60 * 24;
+    // Calculate the difference in milliseconds and convert to days
+    return Math.round((date2.getTime() - date1.getTime()) / msPerDay);
+  },
+
+  /**
+   * Gets the current timestamp as an ISO 8601 string (UTC).
+   * @returns {string} e.g., "2023-10-27T10:30:00.000Z"
    */
   getNow: function () {
     return new Date().toISOString();
   },
 
   /**
-   * Returns today's date as a Date object.
-   *
-   * @returns {Date} - The current date as a Date object.
+   * Gets today's date as a Date object, normalized to midnight UTC.
+   * @returns {Date} Today's date.
    */
   getToday: function () {
     const today = new Date();
-    today.setHours(0, 0, 0, 0); // Ensure hours, minutes, seconds, and milliseconds are set to zero
-    return today;
+    // Normalize to midnight UTC of the current day
+    return new Date(
+      Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())
+    );
   },
 
   /**
-   * Returns today's date as a formatted string (YYYY-MM-DD).
-   *
-   * @returns {string} - The current date formatted as YYYY-MM-DD.
+   * Gets today's date as a formatted string (YYYY-MM-DD).
+   * @returns {string} Today's date string.
    */
   getTodayStr: function () {
     return this.determineFormattedDate(this.getToday());
   },
 };
+Object.freeze(DateManager);
 
 /**
- * The `PropertyManager` constant is responsible for managing document properties within
- * Google Sheets. It handles the storage, retrieval, and updating of properties that are
- * essential for tracking the state of the document, such as timestamps of the last
- * updates or other important metadata.
- *
- * The `PropertyManager` abstracts the complexity of interacting with Google Sheets'
- * PropertiesService, providing an easy-to-use interface for storing and retrieving
- * key-value pairs. It plays a crucial role in maintaining the state and ensuring that
- * the application behaves consistently across sessions.
+ * Manages script and document properties using PropertiesService.
+ * Caches properties in memory for performance.
  */
 const PropertyManager = {
-  /**
-   * Object to hold all loaded properties from the document.
-   *
-   * Once the properties are loaded from the PropertiesService, they are cached in this object
-   * for quicker access. This prevents multiple calls to the PropertiesService, improving performance.
-   *
-   * @type {Object.<string, string>}
-   */
-  properties: {},
+  /** @private @type {Object<string, string> | null} _properties - In-memory cache. */
+  _properties: null,
+  /** @private @type {boolean} _hasChanged - Flag if properties need saving. */
+  _hasChanged: false,
 
   /**
-   * Boolean flag that tracks whether any properties have been modified.
-   *
-   * This flag is used to decide whether the properties need to be saved back to the
-   * PropertiesService after being changed during execution.
-   *
-   * @type {boolean}
-   * @default
+   * Loads properties from PropertiesService into the cache if not already loaded.
+   * @private
    */
-  hasChanged: false,
-
-  /**
-   * Boolean flag indicating whether the properties have been loaded into memory.
-   *
-   * This flag ensures that properties are only loaded once during the script's runtime.
-   * It prevents unnecessary repeated calls to load the same properties.
-   *
-   * @type {boolean}
-   * @default
-   */
-  loaded: false,
-
-  /**
-   * Loads all document properties into memory from PropertiesService.
-   */
-  loadDocumentProperties: function () {
-    LoggerManager.logDebug(
-      `Loading all document properties from PropertyService...`
-    );
-    const allProperties =
-      PropertiesService.getDocumentProperties().getProperties(); // Get all properties at once
-    LoggerManager.logDebug(`allProperties: ${allProperties}`);
-    this.properties = allProperties || {}; // Store in-memory properties
-    LoggerManager.logDebug(
-      `Loaded properties: ${JSON.stringify(this.properties)}.`
-    );
-    this.loaded = true;
+  _loadProperties: function () {
+    if (this._properties === null) {
+      LoggerManager.logDebug("Loading document properties into cache...");
+      try {
+        this._properties =
+          PropertiesService.getDocumentProperties().getProperties();
+        LoggerManager.logDebug(
+          `Properties loaded: ${JSON.stringify(this._properties)}`
+        );
+      } catch (e) {
+        LoggerManager.handleError(
+          `Failed to load document properties: ${e.message}`,
+          true
+        );
+        this._properties = {}; // Initialize empty on error to prevent repeated load attempts
+      }
+      this._hasChanged = false; // Reset changed flag after loading
+    }
   },
 
   /**
-   * Retrieves a property value, initializing it to a default value if not found.
-   * @param {string} key - The property key.
-   * @returns {string} - The property value, or a default if the key does not exist.
+   * Retrieves a property value from the cache, initializing to default if not found.
+   * @param {PropertyKeys} key - The property key enum.
+   * @returns {string} The property value (always a string).
    */
   getProperty: function (key) {
-    if (!this.loaded) {
-      this.loadDocumentProperties();
-    }
-    if (!(key in this.properties)) {
+    this._loadProperties(); // Ensure properties are loaded
+    if (!(key in this._properties)) {
       LoggerManager.logDebug(
-        `Property ${key} not found. Initializing to default value...`
+        `Property '${key}' not found in cache. Initializing to default.`
       );
-      this.properties[key] = this.initializeDefaultProperty(key); // Initialize with default value
+      this._properties[key] = this._initializeDefaultProperty(key);
+      this._hasChanged = true; // Mark as changed since a default was set
     }
-    return this.properties[key];
+    return this._properties[key];
   },
 
   /**
-   * Checks if a given property exists in the loaded properties.
-   * @param {string} key - The property key.
-   * @returns {boolean} - True if the property exists, false otherwise.
+   * Retrieves a property value and converts it to a number.
+   * @param {PropertyKeys} key - The property key enum.
+   * @returns {number | null} The numerical value, or null if not a valid number or not found.
+   */
+  getPropertyNumber: function (key) {
+    const value = this.getProperty(key);
+    const numValue = Number(value);
+    if (isNaN(numValue)) {
+      LoggerManager.handleError(
+        `Property '${key}' value ('${value}') is not a valid number.`,
+        false
+      );
+      return null;
+    }
+    return numValue;
+  },
+
+  /**
+   * Checks if a property key exists in the cache.
+   * @param {PropertyKeys} key - The property key enum.
+   * @returns {boolean} True if the property exists.
    */
   hasProperty: function (key) {
-    if (!this.loaded) {
-      this.loadDocumentProperties();
-    }
-    return key in this.properties;
+    this._loadProperties(); // Ensure properties are loaded
+    return key in this._properties;
   },
 
   /**
-   * Sets a property value and optionally forces saving the properties immediately.
-   * @param {string} key - The property key.
-   * @param {string} value - The value to set for the property.
-   * @param {boolean} [forceSet=false] - Whether to immediately save the property changes.
+   * Sets a property value in the cache and marks for saving.
+   * Ensures the key is valid according to PropertyKeys enum.
+   * Converts non-string values to JSON strings.
+   * @param {PropertyKeys} key - The property key enum.
+   * @param {*} value - The value to set.
+   * @param {boolean} [forceSave=false] - Whether to save properties immediately.
    */
-  setProperty: function (key, value, forceSet = false) {
-    // Check if the key exists in PropertyKeys
+  setProperty: function (key, value, forceSave = false) {
+    // Validate the key
     if (!Object.values(PropertyKeys).includes(key)) {
-      this.handleError(
-        `Invalid property key: ${key}. Allowed keys are: ${Object.values(
-          PropertyKeys
-        ).join(", ")}`
+      LoggerManager.handleError(
+        `Invalid property key used in setProperty: ${key}`,
+        true
       );
       return;
     }
 
-    // If the value is not a string, stringify it before storing
-    this.properties[key] =
-      typeof value === "string" ? value : JSON.stringify(value);
-    this.hasChanged = true; // Mark that properties were changed
+    this._loadProperties(); // Ensure cache is initialized
 
-    if (forceSet) {
+    const stringValue =
+      typeof value === "string" ? value : JSON.stringify(value);
+
+    // Only mark as changed if the value is actually different
+    if (this._properties[key] !== stringValue) {
+      this._properties[key] = stringValue;
+      this._hasChanged = true;
+      LoggerManager.logDebug(
+        `Property '${key}' set to '${stringValue}'. Marked for saving.`
+      );
+    } else {
+      LoggerManager.logDebug(
+        `Property '${key}' value is already '${stringValue}'. No change.`
+      );
+    }
+
+    if (forceSave) {
       this.setDocumentProperties();
     }
   },
 
   /**
-   * Initializes a default value for a property if it does not exist.
-   * @param {string} key - The property key to initialize.
-   * @returns {string} - The default value for the property.
+   * Saves cached properties to PropertiesService if changes have been made.
    */
-  initializeDefaultProperty: function (key) {
-    switch (key) {
-      case PropertyKeys.LAST_DATE_SELECTOR_UPDATE:
-        return new Date("2024-01-01T00:00:00Z").toISOString(); // Hardcoding so that LAST_DATE_SELECTOR_UPDATE always initializes before LAST_COMPLETION_UPDATE
-
-      case PropertyKeys.LAST_COMPLETION_UPDATE:
-        return DateManager.getNow();
-
-      // Group cases that return true
-      case PropertyKeys.ACTIVITIES_COLUMN_UPDATED:
-      case PropertyKeys.MODE:
-        return ModeTypes.HABIT_IDEATION;
-
-      // Handle both 'firstChallengeDate' and 'firstChallengeRow' together
-      case PropertyKeys.FIRST_CHALLENGE_DATE:
-      case PropertyKeys.FIRST_CHALLENGE_ROW:
-        this.updateFirstChallengeDateAndRow(); // Set both together if needed
-        return this.properties[key]; // Return the newly set value
-
-      // Handle emojiList separately
-      case PropertyKeys.EMOJI_LIST:
-        this.updateEmojiSpread(); // Initialize emoji list
-        return this.properties[key];
-
-      case PropertyKeys.LAST_UPDATE:
-        return this.updateLastUpdateProperty();
-
-      case PropertyKeys.BOOST_INTERVAL:
-        return HistorySheetConfig.boostIntervalDefault;
-
-      case PropertyKeys.RESET_HOUR:
-        return MainSheetConfig.resetHourDefault;
-
-      // Default case for unrecognized properties
-      default:
-        LoggerManager.handleError(
-          `Attempting to get a property that does not exist: ${key}.`
+  setDocumentProperties: function () {
+    if (this._hasChanged && this._properties !== null) {
+      LoggerManager.logDebug(
+        "Saving changed properties to DocumentProperties..."
+      );
+      try {
+        PropertiesService.getDocumentProperties().setProperties(
+          this._properties,
+          false
+        ); // Set deleteAllOthers to false
+        this._hasChanged = false; // Reset flag after successful save
+        LoggerManager.logDebug(
+          `Properties saved: ${JSON.stringify(this._properties)}`
         );
-        return ""; // Return an empty string for unrecognized properties
+      } catch (e) {
+        LoggerManager.handleError(
+          `Failed to save document properties: ${e.message}`,
+          true
+        );
+      }
+    } else {
+      LoggerManager.logDebug("No property changes to save.");
     }
   },
 
   /**
-   * Updates the stored emoji spread by fetching the current emoji distribution
-   * from the main sheet and storing it as a JSON string.
+   * Provides default values for properties when they are first accessed.
+   * @private
+   * @param {PropertyKeys} key - The property key.
+   * @returns {string} The default value as a string.
    */
-  updateEmojiSpread: function () {
-    const currentEmojiSpread = MainSheetConfig.getCurrentEmojiSpread();
-    this.setProperty(
-      PropertyKeys.EMOJI_LIST,
-      JSON.stringify(currentEmojiSpread)
+  _initializeDefaultProperty: function (key) {
+    LoggerManager.logDebug(`Initializing default value for property: ${key}`);
+    switch (key) {
+      case PropertyKeys.MODE:
+        return ModeTypes.HABIT_IDEATION; // Start in setup mode
+
+      case PropertyKeys.LAST_DATE_SELECTOR_UPDATE:
+        // Initialize slightly in the past to ensure first completion update takes precedence
+        return new Date(Date.now() - 60000).toISOString(); // 1 minute ago
+      case PropertyKeys.LAST_COMPLETION_UPDATE:
+        return DateManager.getNow(); // Initialize to current time
+      case PropertyKeys.LAST_UPDATE:
+        return this._recalculateLastUpdateProperty(); // Calculate based on other timestamps
+
+      case PropertyKeys.ACTIVITIES_COLUMN_UPDATED:
+        return BooleanTypes.FALSE;
+
+      case PropertyKeys.FIRST_CHALLENGE_DATE:
+      case PropertyKeys.FIRST_CHALLENGE_ROW:
+        // This needs special handling as they depend on each other and sheet state
+        this._updateFirstChallengeDateAndRow(); // Update both
+        // Return the value *after* updating (check if it was set)
+        return key in this._properties ? this._properties[key] : "";
+
+      case PropertyKeys.EMOJI_LIST:
+        // Default to empty list if called during first run setup before habits exist
+        const mode =
+          this._properties[PropertyKeys.MODE] || ModeTypes.HABIT_IDEATION; // Get current mode if loaded
+        if (mode === ModeTypes.HABIT_IDEATION) {
+          return "[]"; // Return empty array string during initial setup
+        } else {
+          // If called later and still missing, try to update from sheet (shouldn't happen ideally)
+          HabitManager.updateEmojiSpreadProperty();
+          return key in this._properties ? this._properties[key] : "[]";
+        }
+
+      case PropertyKeys.RESET_HOUR:
+        return String(MainSheetConfig.resetHourDefault);
+      case PropertyKeys.BOOST_INTERVAL:
+        return String(HistorySheetConfig.boostIntervalDefault);
+
+      default:
+        LoggerManager.handleError(
+          `Attempting to initialize unrecognized property key: ${key}`,
+          false
+        );
+        return ""; // Return empty string for safety
+    }
+  },
+
+  /**
+   * Recalculates and returns the value for the LAST_UPDATE property based on other timestamps.
+   * Does not set the property itself, only calculates the value.
+   * @private
+   * @returns {LastUpdateTypes}
+   */
+  _recalculateLastUpdateProperty: function () {
+    // Ensure dependent properties are loaded/initialized first *without* causing infinite loops
+    const lastDateUpdate = this.getProperty(
+      PropertyKeys.LAST_DATE_SELECTOR_UPDATE
     );
+    const lastCompUpdate = this.getProperty(
+      PropertyKeys.LAST_COMPLETION_UPDATE
+    );
+
+    // Simple string comparison works for ISO dates
+    return lastCompUpdate >= lastDateUpdate
+      ? LastUpdateTypes.COMPLETION
+      : LastUpdateTypes.DATE_SELECTOR;
+  },
+
+  /**
+   * Updates the LAST_UPDATE property based on current timestamps.
+   */
+  updateLastUpdateProperty: function () {
+    const newValue = this._recalculateLastUpdateProperty();
+    this.setProperty(PropertyKeys.LAST_UPDATE, newValue);
   },
 
   /**
    * Updates the 'firstChallengeDate' and 'firstChallengeRow' properties.
-   * Sets the first challenge date to today and calculates the first row for the challenge.
+   * Sets date to today, calculates row based on history sheet state.
+   * This should only be called when a *new* challenge actually starts.
+   * @private
    */
-  updateFirstChallengeDateAndRow: function () {
+  _updateFirstChallengeDateAndRow: function () {
     const todayStr = DateManager.getTodayStr();
-    this.setProperty(PropertyKeys.FIRST_CHALLENGE_DATE, todayStr);
-    LoggerManager.logDebug(`First challenge date updated to: ${todayStr}`);
+    this.setProperty(PropertyKeys.FIRST_CHALLENGE_DATE, todayStr); // Set date first
+    LoggerManager.logDebug(`First challenge date property set to: ${todayStr}`);
 
-    const dateColumn = HistorySheetConfig.dateColumn + 1;
-    const lastRow = HistorySheetConfig.getSheet().getLastRow();
-    const firstDataRow = HistorySheetConfig.firstDataRow + 1; // converting to 1-indexed value.
-    let firstRow;
+    const historySheet = HistorySheetConfig._getSheet();
+    let firstRowIndex = HistorySheetConfig.firstDataRow; // Default 0-based index
 
-    if (lastRow < firstDataRow) {
-      firstRow = firstDataRow;
+    if (historySheet) {
+      const lastRow = historySheet.getLastRow();
+      const firstDataSheetRow = HistorySheetConfig.firstDataRow + 1; // 1-based
+
+      if (lastRow >= firstDataSheetRow) {
+        // If history has data, the new challenge starts *after* the last entry.
+        // The 'first row' property likely refers to the row index in the history array/sheet.
+        // A new entry will be appended at lastRow + 1.
+        // What does FIRST_CHALLENGE_ROW actually represent? The index of the first entry *of this challenge*?
+        // Let's assume it's the 0-based index where the *first* entry of this challenge *will be* or *is*.
+        const lastDate = DataHandler.getLastHistoryDate(); // Use DataHandler method
+        if (
+          lastDate &&
+          DateManager.determineFormattedDate(lastDate) === todayStr
+        ) {
+          // If the last entry is already today (e.g., reset on same day), reuse that row index.
+          firstRowIndex = lastRow - 1; // Convert 1-based lastRow to 0-based index
+        } else {
+          // Otherwise, the first entry will be the next row index.
+          firstRowIndex = lastRow; // lastRow is 1-based, which equals the 0-based index of the *next* row
+        }
+      } else {
+        // History is empty or only has headers, first entry will be at the first data row index.
+        firstRowIndex = HistorySheetConfig.firstDataRow; // 0-based index
+      }
     } else {
-      const sheet = HistorySheetConfig.getSheet();
-      const dateAtLastRow = sheet.getRange(lastRow, dateColumn).getValue(); // Get the Date object from the last row
-      const formattedDate = DateManager.determineFormattedDate(dateAtLastRow);
-      firstRow = formattedDate === todayStr ? lastRow : lastRow + 1;
-    }
-
-    firstRow -= 1;
-
-    this.setProperty(PropertyKeys.FIRST_CHALLENGE_ROW, firstRow); // Store it as a 0-indexed number
-    LoggerManager.logDebug(
-      `First challenge row set to ${firstRow} for date ${todayStr} with lastRow of ${lastRow}`
-    );
-  },
-
-  /**
-   * Updates the `lastUpdate` property based on which of the tracked timestamps
-   * (`lastCompletionUpdate` or `lastDateSelectorUpdate`) is more recent.
-   *
-   * @returns string - The value of the property.
-   *
-   * This method compares the timestamps of the last completion update and the last date selector
-   * update, and sets the `lastUpdate` property to either completion or dateSelector
-   * depending on which action occurred most recently.
-   *
-   * This ensures that subsequent logic can determine the most recent change and act accordingly.
-   */
-  updateLastUpdateProperty: function () {
-    // Get the current values of the properties
-    const lastDateSelectorUpdate = this.getProperty(
-      PropertyKeys.LAST_DATE_SELECTOR_UPDATE
-    );
-    const lastCompletionUpdate = this.getProperty(
-      PropertyKeys.LAST_COMPLETION_UPDATE
-    );
-
-    const newLastUpdate =
-      lastCompletionUpdate >= lastDateSelectorUpdate
-        ? LastUpdateTypes.COMPLETION
-        : LastUpdateTypes.DATE_SELECTOR;
-    this.setProperty(PropertyKeys.LAST_UPDATE, newLastUpdate);
-    return newLastUpdate;
-  },
-
-  /**
-   * Retrieves the property value for the given key, converts it to a number, and returns it.
-   * If the property value is not a valid number, logs an error and returns null.
-   *
-   * @param {string} key - The key for the property to retrieve.
-   * @returns {number|null} - The numerical value of the property or null if invalid.
-   */
-  getPropertyNumber: function (key) {
-    const value = this.getProperty(key);
-    const numValue = Number(value);
-
-    if (isNaN(numValue)) {
       LoggerManager.handleError(
-        `getPropertyNumber: Property ${key} is not a valid number`
+        "History sheet not found while updating first challenge row property.",
+        false
       );
-      return null; // Or handle it in another way, like throwing an error
+      // Keep default firstRowIndex
     }
 
-    return numValue;
-  },
-
-  /**
-   * Saves the modified properties to the document if any changes have occurred.
-   */
-  setDocumentProperties: function () {
+    this.setProperty(PropertyKeys.FIRST_CHALLENGE_ROW, String(firstRowIndex)); // Store as string
     LoggerManager.logDebug(
-      `setDocumentProperties. current properties: ${JSON.stringify(
-        this.properties
-      )}`
+      `First challenge row property (0-based index) set to: ${firstRowIndex}`
     );
-    if (this.hasChanged) {
-      PropertiesService.getDocumentProperties().setProperties(this.properties);
-      LoggerManager.logDebug(
-        `Properties saved to document: ${JSON.stringify(this.properties)}.`
-      );
-      this.hasChanged = false; // Reset the flag after saving
-    }
   },
 };
+// No freeze here, properties need to be mutable internally
