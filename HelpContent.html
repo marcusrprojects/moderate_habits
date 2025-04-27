@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 5%;
+      background-color: #FFF9F5;
+      color: #5b0f00;
+    }
+    p {
+      font-size: .9em; /* Adjust the font size for the paragraph */
+    }
+    h2 {
+      /* color: #333; */
+      font-size: 1.5em;
+    }
+    h3 {
+      /* color: #333; */
+      font-size: 1.2em;
+    }
+    ul {
+      list-style-type: none;
+      padding: 0;
+    }
+    ol {
+      padding: 0 5%; Slight indentation to keep it neat
+    }
+    ol li {
+      margin: 0.5em 0; /* Ensure consistent spacing between items */
+      font-size: .9em; /* Make the font size smaller to fit better */
+    }
+    .category-title {
+      /* color: black; */
+      font-size: 1.2em%;
+    }
+    .description {
+      color: #954535;
+      font-size: .85em;
+      margin-bottom: 1.1em;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <h2>"<?= sheetName ?>" Sheet Help</h2>
+  <div>
+    <? if (mode === 'habitIdeation') { ?>
+      <span class="category-title">Welcome to Moderate Habits!</span>
+      <p class="description">
+        Thanks for using this tool! Here are the basic steps to get started:
+        <ol>
+          <li>Input your habits as emojis in the "activities" column. Within this column, only cells with 1+ emojis will be counted as habits; you can still use non-emoji cells for labeling and other purposes. Also, you're encouraged to more closely define what each habit represents by using the "Insert Note" feature on each appropriate habit cell.</li>
+          <li>Once you are happy with your habit distribution, check the "set habit" checkbox.</li>
+        </ol>
+        Note: you're encouraged to group habits together for consistency across various habits! That's why each habit in this spread must follow the same buffer interval.
+      </p>
+    <? } else if (mode === 'terminated') { ?>
+      <span class="category-title">**CHALLENGE HAS BEEN TERMINATED**</span>
+      <p class="description">
+        Your previous challenge has been terminated.
+        You must start a new challenge, using the settings menu, to proceed.
+      </p>
+    <? } else if (sheetName === MainSheetConfig.sheetName) { ?>
+      <p>Updates upon its daily renewal and through use of the date selector. If completion data has adjusted since last updating the sheet, it will save and propagate these changes. Otherwise, the sheet simply loads in a new date.</p>
+      <ul>
+        <li><span class="category-title">Activities Column</span>
+          <br><span class="description">Scheduled activities for the day, listed in a suggested order. These times are merely suggestions; the goal is to complete all activities.</span>
+        </li>
+        
+        <li><span class="category-title">Completion Column</span>
+          <br><span class="description">Tracks whether the activities have been completed. A checkmark indicates a success.</span>
+        </li>
+        
+        <li><span class="category-title">Buffer Days Column</span>
+          <br><span class="description">This column records any buffer days the user has accumulated related to the activities. If an activity was not completed on a previous day within the current streak, this will decrease. If it reaches 0, breaking the buffer will restart the current challenge.</span>
+        </li>
+        
+        <li><span class="category-title">Current Streak</span>
+          <br><span class="description">The number of consecutive days that activities have been successfully completed (without reaching the failure case).</span>
+        </li>
+        
+        <li><span class="category-title">Highest Streak</span>
+          <br><span class="description">The highest number of consecutive days that the activities have been successfully completed for.</span>
+        </li>
+        
+        <li><span class="category-title">Date Selector</span>
+          <br><span class="description">The cell where you select the date to view or update activities for a specific day.</span>
+        </li>
+      </ul>
+      
+      <h3>Key</h3>
+      <p>The goal is to build long-lasting habits. Skipping two days in a row significantly predicts the loss of an immature habit. 
+        Below, find an example habit spread with a description. Note that you are allowed to refer multiple related habits with the same emoji, which especially useful for tracking related habits.</p>
+      <ul>
+        <li><span class="category-title">🏋️</span>
+          <br><span class="description">20m of indoor exercise. 6k steps or 15m of outdoor exercise. (12k steps overrides the indoor requirement)</span>
+        </li>
+
+        <li><span class="category-title">🧴</span>
+          <br><span class="description">Perform your daily face (2x) and hair (1x) care routine.</span>
+        </li>
+
+        <li><span class="category-title">🌮</span>
+          <br><span class="description">No desserts, prioritize whole over refined grains, and stop eating by 8:30 p.m.</span>
+        </li>
+
+        <li><span class="category-title">💻</span>
+          <br><span class="description">A 25m coding session (e.g. LeetCode, project work). (Completing this earlier in the day is more effective)</span>
+        </li>
+
+        <li><span class="category-title">📖 Reading</span>
+          <br><span class="description">25m of reading a book (physical, eBook, or audiobook) or listening to a podcast. (physical book or eBook preferred)</span>
+        </li>
+
+        <li><span class="category-title">💤 Sleep</span>
+          <br><span class="description">Sleep by 12:30 a.m.</span>
+        </li>
+
+        <li><span class="category-title">🥛 Hydration</span>
+          <br><span class="description">Consume 82.5 ounces of hydrating fluids.</span>
+        </li>
+
+        <li><span class="category-title">📱 Social Media</span>
+          <br><span class="description">Limit social media usage to 30 minutes.</span>
+        </li>
+      </ul>
+    <? } else if (sheetName === HistorySheetConfig.sheetName) { ?>
+      <p>This section explains the columns in the history sheet. Each row represents data for one day. This sheet is locked as it is merely a log.</p>
+      <ul>
+        <li><span class="category-title">Date Column</span>
+          <br><span class="description">The date of the activity, used to track daily progress. In YYYY-MM-DD format.</span>
+        </li>
+        
+        <li><span class="category-title">Activities Column</span>
+          <br><span class="description">A list of activity completion data (true v.s. false or "") selected date as taken from the main sheet in order.</span>
+        </li>
+        
+        <li><span class="category-title">Buffer Days Column</span>
+          <br><span class="description">A list of the each activity's remaining buffer days for the selected date. If an activity is not completed on a given day, the buffer days will decrement the next day, until the challenge fails.</span>
+        </li>
+        
+        <li><span class="category-title">Current Streak Column</span>
+          <br><span class="description">Shows the number of consecutive days that activities have been successfully completed.</span>
+        </li>
+        
+        <li><span class="category-title">Highest Streak Column</span>
+          <br><span class="description">Displays the highest streak attained.</span>
+        </li>
+      </ul>
+    <? } else { ?>
+      <p>No specific help content available for this sheet.</p>
+    <? } ?>
+  </div>
+</body>
+</html>
