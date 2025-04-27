@@ -7,11 +7,11 @@
 
 /**
  * Manages checking for updates against a remote source.
+ * @namespace LibraryManager
  */
 const LibraryManager = {
   /** @constant {string} LATEST_VERSION - The current hardcoded version of this script. */
   LATEST_VERSION: "6", // Update this when releasing a new version
-
   /** @constant {string} LATEST_VERSION_CSV_URL - URL to fetch the latest version number. */
   LATEST_VERSION_CSV_URL: `https://docs.google.com/spreadsheets/d/e/2PACX-1vTw2YxOfHTpUCcczl3G-rSUNhUe6OEMs1WhLypmZ4uMU_MBMbhqEeWfNvI7MdwK4ln-JRDhXPhhTCMF/pub?gid=0&single=true&output=csv`,
 
@@ -26,7 +26,6 @@ const LibraryManager = {
       });
       const responseCode = response.getResponseCode();
       const content = response.getContentText();
-
       if (responseCode === 200) {
         const csvData = Utilities.parseCsv(content);
         if (csvData && csvData.length > 0 && csvData[0].length > 0) {
@@ -42,7 +41,7 @@ const LibraryManager = {
         }
       } else {
         LoggerManager.handleError(
-          `Failed to fetch version info. Response code: ${responseCode}, Content: ${content}`,
+          `Failed to fetch version info. Response code: ${responseCode}.`,
           false
         );
         return null;
@@ -60,13 +59,18 @@ Object.freeze(LibraryManager);
 
 /**
  * Manages time-driven triggers for the script.
+ * Requires "https://www.googleapis.com/auth/script.scriptapp" OAuth scope.
+ * @namespace TriggerManager
  */
 const TriggerManager = {
+  /** @private @constant {string} _HANDLER_FUNCTION_NAME - The function triggered daily. */
   _HANDLER_FUNCTION_NAME: "renewChecklistForToday",
 
   /**
-   * Checks if the daily reset trigger already exists.
-   * @returns {boolean} True if the trigger exists, false otherwise.
+   * Checks if the daily reset trigger already exists for the current user/script/document.
+   * @private
+   * @returns {boolean} True if the trigger exists, false otherwise or on error.
+   * @throws Will re-throw permission errors if encountered.
    */
   _checkTriggerExists: function () {
     try {
@@ -76,77 +80,127 @@ const TriggerManager = {
           trigger.getHandlerFunction() === this._HANDLER_FUNCTION_NAME
       );
     } catch (e) {
-      LoggerManager.handleError(
-        `Error checking for existing triggers: ${e.message}`,
-        false
-      );
-      return false; // Assume it doesn't exist on error
+      // Log non-fatal errors, but re-throw permission errors as they block functionality
+      if (e.message.includes("Specified permissions are not sufficient")) {
+        LoggerManager.logDebug(
+          `Permission error during _checkTriggerExists: ${e.message}`
+        );
+        throw e; // Re-throw to be caught by caller
+      } else {
+        LoggerManager.handleError(
+          `Error checking for existing triggers: ${e.message}`,
+          false
+        );
+        return false; // Assume not found on non-permission errors
+      }
     }
   },
 
   /**
-   * Deletes all existing triggers for the daily reset function.
+   * Deletes all existing triggers for the daily reset function for the current user/script/document.
    * @private
+   * @returns {boolean} True if deletion attempted successfully (even if none found), false on error.
+   * @throws Will re-throw permission errors if encountered.
    */
   _deleteExistingTriggers: function () {
+    let deletedCount = 0;
     try {
       const triggers = ScriptApp.getUserTriggers(SpreadsheetApp.getActive());
       triggers.forEach((trigger) => {
         if (trigger.getHandlerFunction() === this._HANDLER_FUNCTION_NAME) {
           ScriptApp.deleteTrigger(trigger);
+          deletedCount++;
           LoggerManager.logDebug(
             `Deleted existing trigger with ID: ${trigger.getUniqueId()}`
           );
         }
       });
+      if (deletedCount === 0) {
+        LoggerManager.logDebug("No existing triggers found to delete.");
+      }
+      return true; // Deletion attempt finished
     } catch (e) {
-      LoggerManager.handleError(
-        `Error deleting existing triggers: ${e.message}`,
-        false
-      );
+      // Log non-fatal errors, but re-throw permission errors
+      if (e.message.includes("Specified permissions are not sufficient")) {
+        LoggerManager.logDebug(
+          `Permission error during _deleteExistingTriggers: ${e.message}`
+        );
+        throw e; // Re-throw to be caught by caller
+      } else {
+        LoggerManager.handleError(
+          `Error deleting existing triggers: ${e.message}`,
+          false
+        );
+        return false; // Indicate failure on non-permission errors
+      }
     }
   },
 
   /**
    * Creates the daily time-based trigger if it doesn't exist.
-   * Uses the reset hour defined in properties. Deletes old triggers first.
+   * Ensures only one trigger exists by deleting old ones first.
+   * Handles permission errors gracefully within its try/catch.
+   * @returns {boolean} True if the trigger exists or was successfully created, false if creation failed due to non-permission errors.
+   * @throws Will re-throw permission errors if encountered during trigger operations.
    */
   createTrigger: function () {
-    this._deleteExistingTriggers(); // Ensure only one trigger exists
-
-    if (this._checkTriggerExists()) {
-      LoggerManager.logDebug(
-        `Trigger '${this._HANDLER_FUNCTION_NAME}' already exists.`
-      );
-      return;
-    }
-
-    const resetHour = PropertyManager.getPropertyNumber(
-      PropertyKeys.RESET_HOUR
-    );
-    // Validate resetHour (0-23)
-    if (resetHour === null || resetHour < 0 || resetHour > 23) {
-      LoggerManager.handleError(
-        `Invalid reset hour (${resetHour}) found in properties. Cannot create trigger. Using default ${MainSheetConfig.resetHourDefault}.`
-      );
-      // Optionally default here, or just fail. Let's try defaulting.
-      // resetHour = MainSheetConfig.resetHourDefault;
-      // For safety, let's just not create the trigger if the value is bad.
-      return;
-    }
-
-    LoggerManager.logDebug(
-      `Creating time-driven trigger for ${this._HANDLER_FUNCTION_NAME} at hour ${resetHour}.`
-    );
+    LoggerManager.logDebug(">>> Entering TriggerManager.createTrigger");
     try {
+      LoggerManager.logDebug("Attempting to delete existing triggers...");
+      if (!this._deleteExistingTriggers()) {
+        // Logged non-permission error during delete, proceed cautiously
+        LoggerManager.logDebug(
+          "Proceeding despite potential error during trigger deletion."
+        );
+      }
+
+      LoggerManager.logDebug(
+        "Checking if trigger exists after delete attempt..."
+      );
+      if (this._checkTriggerExists()) {
+        LoggerManager.logDebug(
+          `Trigger '${this._HANDLER_FUNCTION_NAME}' exists (or delete/check failed). No creation needed.`
+        );
+        return true; // Trigger exists or prerequisite failed, consider it 'ok' for now
+      }
+
+      // Proceed to create if it doesn't exist
+      const resetHour = PropertyManager.getPropertyNumber(
+        PropertyKeys.RESET_HOUR
+      );
+      // Strict validation for reset hour
+      if (
+        resetHour === null ||
+        !Number.isInteger(resetHour) ||
+        resetHour < 0 ||
+        resetHour > 23
+      ) {
+        // This is a configuration error, should be fatal for this operation
+        LoggerManager.handleError(
+          `Invalid reset hour (${resetHour}) in properties. Cannot create trigger.`,
+          true
+        );
+        return false; // Should be unreachable
+      }
+
+      LoggerManager.logDebug(
+        `Attempting ScriptApp.newTrigger for ${this._HANDLER_FUNCTION_NAME} at hour ${resetHour}.`
+      );
       ScriptApp.newTrigger(this._HANDLER_FUNCTION_NAME)
         .timeBased()
         .atHour(resetHour)
         .everyDays(1)
         .create();
       LoggerManager.logDebug("Trigger created successfully.");
+      return true; // Trigger created
     } catch (e) {
-      LoggerManager.handleError(`Failed to create trigger: ${e.message}`, true);
+      // Catch errors specifically from trigger operations (delete, check, create)
+      // These errors (especially permission ones) should be propagated up
+      LoggerManager.handleError(
+        `Failed during trigger operations: ${e.message}. Ensure manifest includes 'script.scriptapp' and permissions were granted.`,
+        true
+      );
+      return false; // Should be unreachable due to throw
     }
   },
 };
