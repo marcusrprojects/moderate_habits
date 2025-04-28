@@ -1,5 +1,7 @@
 # Moderate Habits - Google Sheet Habit Tracker
 
+![Version](https://img.shields.io/github/v/release/marcusrprojects/moderate_habits)
+
 Moderate Habits is a habit-tracking application built entirely within Google Sheets, powered by Google Apps Script. It helps you build consistency by tracking daily habits, managing streaks, and providing flexible "buffer" days so missing a single day doesn't break your momentum.
 
 It's designed for those who want a simple, customizable, and free way to monitor their progress directly in a familiar spreadsheet environment.
